@@ -1,0 +1,5 @@
+outs:
+- md5: c2314ce5a3a9c8978c61f7e3dc13a5cb
+  size: 15699
+  hash: md5
+  path: comscore.parquet

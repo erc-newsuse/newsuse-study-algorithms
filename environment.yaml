@@ -1,0 +1,32 @@
+name: newsuse-study-algorithms
+channels:
+  - conda-forge
+dependencies:
+  - python>=3.11,<3.13
+  - ipython
+  - ipdb
+  - libsqlite=3.48.0
+  - dvc
+  - dvc-gdrive
+  - pip
+  - r-base>=4.3
+  - r-remotes
+  - r-rhpcblasctl
+  - r-reticulate
+  - r-arrow
+  - r-dplyr
+  - r-tidyr
+  - r-tibble
+  - r-emmeans
+  - r-broom
+  - r-broom.mixed
+  - r-stringr
+  - r-lubridate
+  - r-purrr
+  - r-readr
+  - r-nloptr=2.1.1
+  - r-matrix=1.6.5
+  - r-lme4=1.1.35.5
+  - r-tmb=1.9.15
+  # - r-glmmtmb=1.1.10
+  # - r-rbeast=1.0.1

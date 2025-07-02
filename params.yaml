@@ -1,0 +1,149 @@
+paths:
+  make!:          "newsuse.config:Paths"
+  data:           "data"
+  raw:            "@data/raw"
+  proc:           "@data/proc"
+  news:           "@proc/news.parquet"
+  nonnews:        "@proc/non-news.parquet"
+  dataset:        "@proc/dataset.parquet"
+  comscore:       "@proc/comscore.parquet"
+  statista:       "@raw/statista-facebook-users.xlsx"
+  counts:         "@proc/counts.parquet"
+  timeseries:     "@proc/timeseries.parquet"
+  weekly:         "@proc/weekly.parquet"
+  weekly_nonnews: "@proc/weekly-non-news.parquet"
+  signal:         "@proc/signal.parquet"
+  beast:          "@proc/beast.parquet"
+  changepoints:   "@proc/changepoints.parquet"
+  epochs:         "@proc/epochs.parquet"
+  epochmeta:      "@proc/epoch-meta.parquet"
+  events:         "@raw/events.xlsx"
+  models:         "models"
+  glmm:           "@models/glmm"
+  figures:        "figures"
+
+elections:
+  Clinton/Trump: "2016-11-08"
+  Biden/Trump:   "2020-11-03"
+  Harris/Trump:  "2024-11-05"
+
+data:
+  usecols:
+  - key
+  - country
+  - name
+  - quality
+  - media
+  - ideology
+  - followers
+  - timestamp
+  - type
+  - author
+  - reactions
+  - comments
+  - shares
+  - reactions_LIKE
+  - reactions_LOVE
+  - reactions_WOW
+  - reactions_HAHA
+  - reactions_ANGRY
+  - reactions_SAD
+  - post_url
+  author:
+  - page
+  imputation:
+    source: reactions
+    target: reactions_combined
+
+signal:
+  groups:
+  - country
+
+comscore:
+  imputation:
+    limit: 6
+
+changepoints:
+  timescale: ${eval:365.25 / 12 / 7 * 2}
+  beast:
+    seed: 303
+    n_runs: 1000
+    metadata:
+      isRegularOrdered: false
+      whichDimIsTime: 1
+      deltaTime: ${eval:1 / 52}
+      season: none
+      period: none
+      hasOutlier: true
+      deseasonalize: false
+      detrend: false
+    prior:
+      trendMinOrder: 0
+      trendMaxOrder: 1
+      trendMinKnotNum: 0
+      trendMaxKnotNum: 30
+      trendMinSepDist: 13
+  peaks:
+    distance: ${..timescale}
+    prominence: 0.05
+    height: 0.5
+  subsets:
+    reactions-mu-cv: ["reactions_mu", "reactions_cv"]
+    reactions-rel-mu-cv: ["reactions_rel_mu", "reactions_rel_cv"]
+  use: reactions-rel-mu-cv
+
+epochs:
+  min_posts: 20
+
+inference:
+  alpha: 0.05
+  conf: ${eval:1-${.alpha}}
+  adjust: mvt
+
+parallel:
+  maxcores: 16
+
+ml:
+  inference:
+    batch_size: 32
+  labels:
+    political:
+      name: sztal/erc-newsuse-political
+      revision: fef010024063951549e2f98203689ee1581fd39f
+    negativity:
+      name: sztal/erc-newsuse-negativity
+      revision: ca2667b6ab5c6ea3f2e3b6bd17553e494a8f8723
+
+plotting:
+  style: seaborn-v0_8-deep
+  color:
+    palette:
+      gold:   "#f8c118"
+      purple: "#9659a7"
+      green:  "#83aa53"
+      gray:   "#c7bbbb"
+      blue:   "#82c5fc"
+  params:
+    font.family:           sans-serif
+    font.sans-serif:       Montserrat
+    text.usetex:           false
+    text.latex.preamble:   \usepackage{amsmath,amsfonts,amssymb,sfmath,xcolor}
+    figure.figsize:        [5, 5]
+    figure.labelsize:      x-large
+    figure.titlesize:      xx-large
+    figure.titleweight:    bold
+    savefig.bbox:          tight
+    axes.grid:             false
+    axes.axisbelow:        true
+    axes.titleweight:      bold
+    axes.titlesize:        large
+    axes.labelsize:        medium
+    axes.prop_cycle:
+      make!:               matplotlib:cycler
+      color:               ${oc.dict.values:plotting.color.palette}
+    scatter.marker:        o
+    scatter.edgecolors:    black
+    lines.markeredgecolor: black
+    lines.markeredgewidth: 1
+    legend.handlelength:   0.0
+    legend.borderpad:      0.75

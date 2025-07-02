@@ -1,0 +1,466 @@
+---
+title: "Basic descriptives"
+author: "Szymon Talaga"
+date: last-modified
+date-format: "MMMM D, YYYY | HH:mm:ss (Z)"
+toc: true
+toc-depth: 3
+toc-location: left
+execute:
+  echo: false
+  warning: false
+  cache: false
+  daemon: false
+format:
+  html:
+    grid:
+      margin-width: 350px
+    embed-resources: true
+  pdf:
+    toc: false
+    number-sections: true
+    colorlinks: true
+reference-location: margin
+citation-location: margin
+---
+
+```{python}
+import importlib
+from typing import Mapping
+import datetime
+import numpy as np
+import pandas as pd
+from scipy import stats
+import matplotlib as mpl
+import matplotlib.dates
+import matplotlib.transforms
+import matplotlib.pyplot as plt
+from matplotlib.patheffects import withStroke
+import seaborn as sns
+import seaborn.objects as so
+from newsuse.data import DataFrame
+from project import config, paths
+
+mpl.style.use(config.plotting.style)
+mpl.rcParams.update({
+    k: v.make() if isinstance(v, Mapping) and "make!" in v else v
+    for k, v in config.plotting.params.items()
+})
+
+# Get default color cycle here and extract colors
+figpath = paths.figures / "descriptives"
+figpath.mkdir(parents=True, exist_ok=True)
+
+QUALITY = ["low", "medium", "high"]
+QCAT    = [*QUALITY, "non-news"]
+COLORS  = mpl.rcParams["axes.prop_cycle"].by_key()["color"]
+CMAP    = dict(zip(QCAT, COLORS, strict=False))
+```
+
+
+```{python}
+metadata = DataFrame.from_(paths.raw / "metadata.parquet")
+dataset = (
+    pd.concat(
+        [
+            DataFrame.from_(paths.dataset),
+            DataFrame.from_(paths.nonnews).assign(quality="non-news"),
+        ],
+        axis=0,
+        ignore_index=True,
+    )
+    .assign(quality=
+        lambda df: pd.Categorical(df["quality"], categories=QCAT)
+    )
+)
+```
+
+## Basic descriptives
+
+### Post and reaction totals and averages
+
+```{python}
+data = pd.concat({
+    "posts (total)": (
+        dataset
+        .groupby(["quality", "year"], observed=True)
+        .size()
+    ),
+    "reactions (average)": (
+        dataset
+        .groupby(["quality", "year"], observed=True)
+        ["reactions"]
+        .mean()
+    )
+}, axis=1)
+```
+
+```{python}
+table = (
+    data
+    .unstack(level="quality")
+)
+total = (
+    pd.concat(
+        {
+            "posts (total)": table["posts (total)"].sum(),
+            "reactions (average)": table["reactions (average)"].mean(),
+        },
+        axis=1,
+    )
+    .unstack(level="quality")
+    .to_frame("overall")
+    .T
+)
+
+table = pd.concat([table, total], axis=0)
+table
+```
+
+```{python}
+(
+    table
+    # Print it nicely as Latex table using pandas styler
+    # and apply bold format to the last row with 'overall' label
+    .style
+    .apply(lambda s: pd.Series("font-weight: bold;", index=["overall"]))
+    .format(
+        {
+            **dict.fromkeys([("posts (total)", q) for q in QCAT], "{:,.0f}"),
+            **dict.fromkeys([("reactions (average)", q) for q in QCAT], "{:,.0f}"),
+        },
+        escape="latex",
+    )
+    .pipe(
+        lambda df: print(
+            df.to_latex(
+                label="tab:descriptives-basic",
+                caption="Basic descriptives of posts and reactions by quality and year.",
+                position="h!tbp",
+                column_format="lrrr",
+                hrules=True,
+                multicol_align="c",
+                multirow_align="t",
+                position_float="centering",
+                convert_css=True,
+            )
+        )
+    )
+)
+```
+
+### Average outlet totals
+
+```{python}
+data = pd.concat({
+    "posts (average outlet total)": (
+        dataset
+        .groupby(["country", "name", "quality", "year"], observed=True)
+        .size()
+        .groupby(["quality", "year"], observed=True)
+        .mean()
+    ),
+    "reactions (average outlet total)": (
+        dataset
+        .groupby(["country", "name", "quality", "year"], observed=True)
+        ["reactions"]
+        .sum()
+        .reset_index(["country", "name"], drop=False)
+        .groupby(["quality", "year"], observed=True)
+        .apply(
+            lambda df: (
+                df["reactions"]
+                .div(df[["country", "name"]].drop_duplicates().shape[0])
+                .mean()
+            )
+        )
+    ),
+}, axis=1)
+```
+
+```{python}
+table = (
+    data
+    .unstack(level="quality")
+)
+total = (
+    pd.concat(
+        {
+            "posts (average outlet total)":
+                table["posts (average outlet total)"].mean(),
+            "reactions (average outlet total)":
+                table["reactions (average outlet total)"].mean(),
+        },
+        axis=1,
+    )
+    .unstack(level="quality")
+    .to_frame("overall")
+    .T
+)
+
+table = pd.concat([table, total], axis=0)
+table
+```
+
+```{python}
+(
+    table
+    # Print it nicely as Latex table using pandas styler
+    # and apply bold format to the last row with 'overall' label
+    .style
+    .apply(lambda s: pd.Series("font-weight: bold;", index=["overall"]))
+    .format(
+        {
+            **dict.fromkeys(
+                [("posts (average outlet total)", q) for q in QCAT],
+                "{:,.0f}"
+            ),
+            **dict.fromkeys(
+                [("reactions (average outlet total)", q) for q in QCAT],
+                "{:,.0f}"
+            ),
+        },
+        escape="latex",
+    )
+    .pipe(
+        lambda df: print(
+            df.to_latex(
+                label="tab:descriptives-basic",
+                caption="Basic descriptives of posts and reactions by quality and year.",
+                position="h!tbp",
+                column_format="lrrr",
+                hrules=True,
+                multicol_align="c",
+                multirow_align="t",
+                position_float="centering",
+                convert_css=True,
+            )
+        )
+    )
+)
+```
+
+### Plots
+
+#### Boxplots and CCDFs
+
+```{python}
+fig, axes = plt.subplots(ncols=3, figsize=(7, 2.5))
+
+data = (
+    dataset
+    .groupby(["quality", "country", "name"])
+    .size()
+    .reset_index(name="posts")
+    .query("posts > 0")
+    .reset_index(drop=True)
+)
+
+# Box plot of per outlet number of posts by quality
+ax = axes[0]
+sns.boxplot(
+    data=data,
+    x="quality",
+    y="posts",
+    hue="quality",
+    ax=ax,
+)
+ax.set_xlabel(None)
+ax.set_ylabel(None)
+ax.set_title("Number of posts")
+ax.set_yscale("log")
+ax.set_ylim(10**2, 10**6)
+
+# Box plot of per outlet average reactions by quality
+data = (
+    dataset
+    .groupby(["quality", "country", "name"])
+    .agg({
+        "reactions": "mean",
+        "name": "size",
+    })
+    .rename(columns={"name": "posts"})
+    .reset_index()
+    .query("posts > 0")
+)
+ax = axes[1]
+sns.boxplot(
+    data=data,
+    x="quality",
+    y="reactions",
+    hue="quality",
+    ax=ax,
+)
+ax.set_xlabel(None)
+ax.set_ylabel(None)
+ax.set_title("Average reactions")
+ax.set_yscale("log")
+
+# Empirical CDF of reactions by quality
+ax = axes[2]
+sns.ecdfplot(
+    data=dataset,
+    x="reactions",
+    hue="quality",
+    complementary=True,
+    ax=ax,
+    legend=False,
+)
+ax.set_xscale("log")
+ax.set_yscale("log")
+ax.set_xlabel(None)
+ax.set_ylabel(None)
+ax.set_title("Reactions CCDF")
+
+y0, y1 = ax.get_ylim()
+ax.set_ylim(y0*.6, y1*1.4)
+
+for ax in axes:
+    ax.tick_params(labelsize=8)
+
+quality_handles = [
+    mpl.lines.Line2D([0], [0], lw=0, label="Quality", marker="none")
+] + [
+    mpl.lines.Line2D(
+        [0], [0], color=c, lw=2, label=q.capitalize(),
+        linewidth=3, marker="none",
+    ) for q, c in CMAP.items() if q != "non-news"
+]
+quality_legend = fig.legend(
+    handles=quality_handles,
+    loc="center left",
+    ncol=len(quality_handles),
+    bbox_to_anchor=(0.02, 0),
+    fontsize=8,
+    frameon=False,
+    handlelength=1.5,
+)
+ax.add_artist(quality_legend)
+
+nonnews_handles = [
+    mpl.lines.Line2D(
+        [0], [0], color=CMAP["non-news"], lw=2, label="Non-news",
+        marker="none",
+    )
+]
+fig.legend(
+    handles=nonnews_handles,
+    loc="center right",
+    ncol=1,
+    bbox_to_anchor=(.98, 0),
+    fontsize=8,
+    frameon=False,
+    handlelength=1.5,
+)
+
+fig.tight_layout()
+fig.savefig(figpath / "descriptives-basic.pdf")
+```
+
+## Detailed tables
+
+### News
+
+```{python}
+def iqr(x):
+    """Interquartile range."""
+    return stats.iqr(x, nan_policy="omit")
+
+table = (
+    dataset
+    .groupby(["quality", "name"], observed=True)
+    .agg({
+        "n_posts": "size",
+        "reactions": ["mean", "std", "median", iqr],
+        "comments": ["mean", "std", "median", iqr],
+        "shares": ["mean", "std", "median", iqr],
+    })
+    .pipe(
+        lambda df: df.set_index(
+            pd.Series(df.iloc[:, 0], name="posts"),
+            append=True,
+        )
+    )
+    .drop(columns="n_posts")
+    .sort_index(
+        level=["quality", "name"],
+        key=lambda s: s.str.lower().str.removeprefix("the").str.strip(),
+    )
+    .sort_index(level="quality", sort_remaining=False)
+)
+
+(
+    table
+    .style
+    .format(
+        "{:.2f}",
+        escape="latex",
+    )
+    .pipe(lambda df: print(df.to_latex(
+        column_format="lrrrrrr",
+        hrules=True,
+        multicol_align="c",
+        multirow_align="c",
+        position_float="centering",
+        convert_css=True,
+    )))
+)
+```
+
+### Non-news
+
+```{python}
+table = (
+    DataFrame.from_(paths.nonnews)
+    .groupby(["name"], observed=True)
+    .agg({
+        "key": "size",
+        "reactions": ["mean", "median", "std"],
+        "comments": ["mean", "median", "std"],
+    })
+    .pipe(
+        lambda df: df.set_index(
+            pd.Series(df.iloc[:, 0], name="posts"),
+            append=True,
+        )
+    )
+    .drop(columns=("key", "size"))
+)
+
+(
+    table
+    .style
+    .format(
+        "{:.2f}",
+        escape="latex",
+    )
+    .pipe(lambda df: print(df.to_latex(
+        column_format="lrrrrrr",
+        hrules=True,
+        multicol_align="c",
+        multirow_align="t",
+        position_float="centering",
+        convert_css=True,
+    )))
+)
+```
+
+
+## Correlations between engagement metrics
+
+```{python}
+r = (
+    dataset[["reactions", "comments", "shares"]]
+    .dropna()
+    .transform(np.log)
+    .corr(method="pearson")
+    .loc["reactions", ["comments", "shares"]]
+)
+rho = (
+    dataset[["reactions", "comments", "shares"]]
+    .dropna()
+    .corr(method="spearman")
+    .loc["reactions", ["comments", "shares"]]
+)
+DataFrame([r, rho], index=["Pearson", "Spearman"])
+```

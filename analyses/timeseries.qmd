@@ -1,0 +1,573 @@
+---
+title: "Timeseries analysis"
+author: "Szymon Talaga"
+date: last-modified
+date-format: "MMMM D, YYYY | HH:mm:ss (Z)"
+toc: true
+toc-depth: 3
+toc-location: left
+execute:
+  echo: false
+  warning: false
+  cache: false
+  daemon: false
+format:
+  html:
+    grid:
+      margin-width: 350px
+    embed-resources: true
+  pdf:
+    toc: false
+    number-sections: true
+    colorlinks: true
+reference-location: margin
+citation-location: margin
+---
+
+```{r}
+library(arrow)
+library(stringr)
+library(dplyr)
+library(purrr)
+library(tibble)
+library(emmeans)
+library(broom)
+library(reticulate)
+library(lubridate)
+library(glmmTMB)
+
+use_condaenv("newsuse-study-algorithms")
+
+project <- import("project")
+config  <- project$config
+paths   <- project$paths[["__copy__"]]()
+
+alpha     <- config$inference$alpha
+conf      <- config$inference$conf
+adjust    <- config$inference$adjust
+
+emm_options(
+    emmeans  = list(type = "response", level = conf, adjust = adjust),
+    contrast = list(adjust = adjust),
+    summary  = list(infer = TRUE),
+    mvt.args = list(abseps = 1e-4)
+)
+```
+
+```{python}
+import importlib
+from typing import Mapping
+import datetime
+import numpy as np
+import pandas as pd
+from scipy import stats
+import matplotlib as mpl
+import matplotlib.dates
+import matplotlib.transforms
+import matplotlib.pyplot as plt
+from matplotlib.patheffects import withStroke
+import seaborn as sns
+import seaborn.objects as so
+from adjustText import adjust_text
+from newsuse.data import DataFrame
+from project import config, paths
+
+mpl.style.use(config.plotting.style)
+mpl.rcParams.update({
+    k: v.make() if isinstance(v, Mapping) and "make!" in v else v
+    for k, v in config.plotting.params.items()
+})
+
+# Get default color cycle here and extract colors
+figpath = paths.figures / "glmm" / "timeseries"
+figpath.mkdir(parents=True, exist_ok=True)
+
+QUALITY   = ["low", "medium", "high"]
+COLORS    = mpl.rcParams["axes.prop_cycle"].by_key()["color"]
+CMAP      = {
+    **dict(zip(QUALITY, COLORS, strict=False)),
+    "non-news": COLORS[3],
+}
+ELECTIONS = {k: pd.Timestamp(v) for k, v in config.elections.items()}
+
+KEYCOLS     = ["country", "name", "quality"]
+GROUPCOLS   = [k for k in KEYCOLS if k != "name"]
+TIMECOLS    = ["week_t", "timestamp"]
+SIGNALCOLS  = ["reactions", "n_posts"]
+ALLCOLS     = KEYCOLS + TIMECOLS + SIGNALCOLS
+COVID_US    = pd.Timestamp("2020-01-19")
+WAR_ON_NEWS = pd.Timestamp("2021-02-10")
+```
+
+```{python}
+weekly = pd.concat(
+    [
+        DataFrame.from_(paths.weekly),
+        DataFrame.from_(paths.weekly_nonnews).assign(quality="non-news"),
+    ],
+    axis=0,
+    ignore_index=True,
+)
+weekly = (
+    weekly
+    .groupby([*GROUPCOLS, "timestamp", "week_t"])
+    [SIGNALCOLS]
+    .mean()
+    .reset_index()
+    .groupby(GROUPCOLS)
+    .apply(lambda df: df[1:-1], include_groups=False)
+    .reset_index(level=GROUPCOLS, drop=False)
+    .reset_index(drop=True)
+)
+ts = weekly.pop("timestamp").tolist()
+weekly = (
+    weekly
+    .convert_dtypes(dtype_backend="numpy_nullable")
+)
+weekly.insert(weekly.columns.tolist().index("week_t"), "timestamp", ts)
+```
+
+```{r}
+data <- py$weekly %>%
+    tibble %>%
+    mutate(
+        quality = factor(quality, levels = c("non-news", "low", "medium", "high")),
+    ) %>%
+    group_by(country, quality) %>%
+    mutate(
+        time = 0L:(n() - 1L),
+        ftime = as.factor(time),
+    ) %>%
+    ungroup() %>%
+    mutate(
+        group = str_c(country, quality, sep = ":"),
+    )
+```
+
+```{r}
+glmm_lm <- glmmTMB(
+    log(reactions) ~ 1 +
+        quality * log(n_posts),
+    dispformula = ~ 1 + quality,
+    data = data,
+    family = gaussian,
+)
+glmm_ts <- update(glmm_lm, . ~ . + ar1(ftime + 0 | group))
+```
+
+```{r}
+# Get model correlations between 'reactions' and 'n_posts' in log-log scale
+svecs <- rlang::ll(
+    "non-news" = c("log(n_posts)"),
+    "low"      = c("log(n_posts)", "qualitylow:log(n_posts)"),
+    "medium"   = c("log(n_posts)", "qualitymedium:log(n_posts)"),
+    "high"     = c("log(n_posts)", "qualityhigh:log(n_posts)"),
+)
+betas <- map_dbl(svecs, ~sum(fixef(glmm_ts)$cond[.x]))
+xvars <- group_by(data, quality) %>% summarize(x = var(log(n_posts))) %>% pull(x)
+yvars <- emmeans(glmm_ts, ~quality, component = "disp", type = "link") %>%
+    tidy %>%
+    mutate(estimate = exp(estimate)) %>%
+    pull(estimate)
+
+correlations <- betas * sqrt(xvars) / sqrt(yvars)
+## They are all very low
+## indicating that dynamics of reactions and posting
+## are mostly independent
+```
+
+```{r}
+## Anova for comparing the models
+anova(glmm_lm, glmm_ts)
+```
+
+```{r}
+# Model R-squared
+glmm <- glmm_ts
+rsq  <- cor(fitted(glmm), glmm$frame[["log(reactions)"]])^2
+rsq
+```
+
+```{r}
+emt <- emtrends(glmm_ts, ~quality, var = "n_posts")
+emt
+```
+
+```{r}
+emtdf <- emt %>%
+    tidy %>%
+    select(
+        quality,
+        # slope = n_posts.trend,
+        adj.p.value
+    ) %>%
+    mutate(r = correlations, .after = "quality")
+emtdf
+```
+
+```{python}
+emtdf = r.emtdf
+(
+    emtdf
+    .set_index("quality")
+    .style
+    .format(escape="latex")
+    .format(formatter="{:.3f}", subset="r")
+    .format(formatter="{:.3f}", subset="adj.p.value")
+    .pipe(
+        lambda df: print(
+            df.to_latex(
+                hrules=True, column_format="lrrr"
+            )
+        )
+    )
+)
+```
+
+## Plot
+
+```{python}
+events = DataFrame.from_(paths.events)
+
+important = {
+    (3, "a"): ("3a. More friends' content", 0),
+    (5, "b"): ("5b. Start of 'War on News'", .15),
+    (6, "a"): ("6a. Less news", -.15),
+    (7, "a"): ("7a. Less news globally", .5),
+    (9, "a"): ("9a. Less news", .225),
+    (9, "b"): ("9b. News ban in Canada", -.35),
+    (11, "a"): ("11a. End of 'War on News'", -.05),
+}
+important = (
+    events.set_index(["Changepoint", "Event"])
+    .loc[list(important)]
+    .reset_index(["Changepoint", "Event"], drop=False)
+    .reset_index(drop=True)
+    .assign(
+        Label=[x[0] for x in important.values()],
+        Shift=[x[1] for x in important.values()],
+    )
+)
+important
+```
+
+```{python}
+fig, axes = plt.subplots(figsize=(7, 3), nrows=2)
+
+data = (
+    weekly[1:-1]
+    .set_index("timestamp")
+    .groupby(["quality"])[SIGNALCOLS]
+    .rolling(4)
+    .mean()
+    .reset_index()
+)
+for ax, col in zip(axes.flat, reversed(SIGNALCOLS), strict=True):
+    (
+        so.Plot(data, x="timestamp", y=col, color="quality")
+        .add(so.Line(), legend=False)
+        .scale(color=CMAP)
+        .on(ax)
+        .plot()
+    )
+    title = "Reactions" if col == "reactions" else "Posts"
+    ax.set_yscale("log")
+    ax.set_xlabel(None)
+    ax.set_ylabel(title)
+    ax.tick_params(labelsize=8)
+
+for ax in axes:
+    # Add elections
+    for ts in ELECTIONS.values():
+        ax.axvline(ts, color="gold", lw=2.5, zorder=0)
+        ax.axvline(ts, color="black", lw=.25, zorder=1)
+
+ax = axes.flatten()[0]
+ax.set_ylim(top=10**3)
+for label, ts in ELECTIONS.items():
+    ax.annotate(
+        label,
+        xy=(ts, 10**2.9),
+        xycoords="data",
+        ha="center",
+        fontsize="x-small",
+        bbox={"facecolor": "white", "pad": 2},
+    )
+
+ax = axes.flatten()[1]
+ax.tick_params(bottom=False, labelbottom=False)
+ax.set_ylim(bottom=10**1.5)
+
+# Mark events
+for ax in axes.flat:
+    texts = []
+    for ts, label, shift in (
+        important[["Date", "Label", "Shift"]]
+        .itertuples(index=False)
+    ):
+        bold = "War" in label
+        ax.axvline(
+            x=ts,
+            color="black",
+            linestyle="-" if bold else "--",
+            linewidth=1.5 if bold else 0.5,
+        )
+        if ax is axes.flatten()[0]:
+            continue
+        exp = 2 + shift
+        text = ax.annotate(
+            label,
+            xy=(ts, 10**exp),
+            xytext=(ts - datetime.timedelta(days=120), 10**exp),
+            arrowprops=dict(arrowstyle="->", lw=0.5),
+            fontsize="x-small",
+            fontweight="bold" if bold else "normal",
+            ha="right",
+            va="center",
+            path_effects=[
+                withStroke(linewidth=0.5, foreground="white", alpha=0.8)
+            ],
+            bbox=dict(
+                facecolor="white", edgecolor="none", pad=0.5, alpha=0.8
+            ),
+        )
+        texts.append(text)
+
+# ====================
+for ax in axes.flat:
+    ax.axvline(
+        x=COVID_US,
+        color="black",
+        linestyle="--",
+        linewidth=0.5,
+    )
+    if ax is axes.flatten()[0]:
+        ax.annotate(
+            "First U.S. COVID case",
+            xy=(COVID_US, 10**1.8),
+            xytext=(COVID_US - datetime.timedelta(days=30), 10**2),
+            arrowprops=dict(arrowstyle="->", lw=0.5),
+            fontsize="x-small",
+            ha="right",
+            va="center",
+        )
+
+quality_handles = [
+    mpl.lines.Line2D([0], [0], lw=0, label="Quality", marker="none")
+] + [
+    mpl.lines.Line2D(
+        [0], [0], color=c, lw=2, label=q.capitalize(),
+        linewidth=3, marker="none",
+    ) for q, c in CMAP.items() if q != "non-news"
+]
+quality_legend = fig.legend(
+    handles=quality_handles,
+    loc="center left",
+    ncol=len(quality_handles),
+    bbox_to_anchor=(0.05, -.02),
+    fontsize=8,
+    frameon=False,
+    handlelength=1.5,
+)
+ax.add_artist(quality_legend)
+
+nonnews_handles = [
+    mpl.lines.Line2D(
+        [0], [0], color=CMAP["non-news"], lw=2, label="Non-news",
+        marker="none",
+    )
+]
+fig.legend(
+    handles=nonnews_handles,
+    loc="center right",
+    ncol=1,
+    bbox_to_anchor=(.98, -0.02),
+    fontsize=8,
+    frameon=False,
+    handlelength=1.5,
+)
+
+fig.tight_layout()
+fig.savefig(figpath / "timeseries.pdf")
+```
+
+### ACF plots
+
+```{r}
+R_lm <- resid(glmm_lm, type = "working")
+R_ts <- resid(glmm_ts, type = "working")
+```
+
+```{python}
+from statsmodels.graphics.tsaplots import plot_acf
+
+R_lm = np.asarray(r.R_lm)
+R_ts = np.asarray(r.R_ts)
+
+fig, axes = plt.subplots(
+    figsize=(7, 2.5), ncols=2,
+    sharex=True, sharey=True
+)
+
+ax = axes[0]
+plot_acf(R_lm, ax=ax)
+ax.set_title("Assuming independent observations")
+
+ax = axes[1]
+plot_acf(R_ts, ax=ax)
+ax.set_title("Assuming AR(1) dependence")
+
+for ax in axes:
+    ax.set_ylim(-1.15, 1.15)
+    ax.tick_params(labelsize=8)
+
+fig.supxlabel(
+    "Time lag (weeks)",
+    y=.1,
+    x=0.5,
+    ha="center",
+    fontsize="medium"
+)
+fig.tight_layout()
+fig.savefig(figpath / "acf.pdf")
+```
+
+## Make model table
+
+```{r}
+tidy.glmmTMB <- function(mod, component = c("cond", "disp", "zi"), ...) {
+    is_disp <- "disp" %in% component
+    if (is_disp) component <- component[-which(component == "disp")]
+    df <- broom.mixed:::tidy.glmmTMB(mod, component = component, ...)
+    if (is_disp) {
+        S <- summary(mod)
+        C <- coef(S)$disp
+        if (!is.null(C)) {
+            C <- cbind(term = rownames(C), as.data.frame(C)) %>%
+                as_tibble %>%
+                set_names(c(
+                    "term", "estimate",
+                    "std.error", "statistic", "p.value"
+                )) %>%
+                mutate(
+                    effect = "fixed",
+                    component = "disp",
+                    group = NA_character_,
+                    .before = 1L,
+                )
+        }
+        V <- S$varcor$disp
+        if (!is.null(V)) {
+            V <- map(names(V), ~{
+                nm <- .x
+                v  <- V[[nm]]
+                attr(v, "stddev") %>%
+                    enframe %>%
+                    mutate(group = nm, .before = 1L)
+            }) %>%
+            bind_rows %>%
+            rename(term = name, estimate = value) %>%
+            mutate(
+                effect = "ran_pars",
+                component = "disp",
+                .before = 1L,
+            ) %>%
+            mutate(
+                std.error = NA_real_,
+                statistic = NA_real_,
+                p.value = NA_real_,
+            )
+        }
+        df <- bind_rows(df, C, V)
+    }
+    df
+}
+```
+
+```{r}
+T_ts <- tidy(glmm_ts, component = c("cond", "disp")) %>%
+    filter(effect != "ran_pars")
+```
+
+```{python}
+def sanitize_term(term, ref="non-news"):
+    def sanitize(t: str):
+        if  t.startswith((prefix := "quality")):
+            return t.removeprefix(prefix).lower()
+        if t.startswith((prefix := "sector")):
+            return t.removeprefix(prefix).lower()
+        if t.startswith((prefix := "epoch")):
+            return prefix+":"+t.removeprefix(prefix)
+        if t == "(Intercept)":
+            return f"(Intercept = {ref.lower()})"
+        return t
+    sep = "__"
+    comp, term = term.split(sep) if sep in term else (None, term)
+    term = ", ".join(
+        r" $\times$ ".join(map(sanitize, t.split(":")))
+        for t in term.split(".")
+    )
+    if comp == "sd":
+        term = rf"$\sigma(\text{{{term}}})$"
+    elif comp == "cor":
+        term = rf"$\rho(\text{{{term}}})$"
+    return term
+
+def make_modeltable(df, topkey: str | None = None):
+    df = (
+        df
+        .drop(columns=["statistic"])
+        .set_index(["effect", "component", "group", "term"])
+        .rename(columns={
+            "estimate":  "b",
+            "std.error": "se",
+            "p.value":   "p",
+        })
+        .rename(lambda s: "fixed" if pd.isnull(s) else s, level="group")
+        .rename({
+            "country:name": "outlet",
+            "country:sector:name": "outlet",
+            "country:name:epoch": "outlet:epoch",
+            "country:sector:name:epoch": "outlet:epoch",
+        }, level="group")
+        .rename(sanitize_term, level="term")
+    )
+    if topkey is not None:
+        df = pd.concat({topkey: df}, axis=1)
+    return df
+
+def format_num(x, digits=3):
+    return "" if np.isnan(x) else f"{x:.{digits}f}"
+
+def format_pval(p, digits=3):
+    if p < 10**-digits:
+        return f"{p:.{digits}e}"
+    return format_num(p, digits)
+
+sanitize_term, make_modeltable, format_num, format_pval
+```
+
+```{python}
+(
+    make_modeltable(r.T_ts, "Reactions")
+    .unstack(level="component")
+    .swaplevel(1, 2, axis=1)
+    .droplevel(level=0, axis=1)
+    [["cond", "disp"]]
+    .rename(lambda s: s.replace("_", r"\_"), axis=0, level="term")
+    .droplevel(level=(0, 1), axis=0)
+    .pipe(lambda df: df.style.format(
+        escape=False,
+        formatter={
+            n: format_pval if n[1] == "p" else format_num
+            for n in df.columns
+        },
+    ))
+    .pipe(lambda df: print(df.to_latex(
+        hrules=True,
+        multicol_align="c",
+        multirow_align="t",
+        siunitx=False,
+    )))
+)
+```

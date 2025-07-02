@@ -1,0 +1,20 @@
+{
+    "_checkout": null,
+    "_output_dir": "/home/newsuse/studies",
+    "_repo_dir": "../python/cookiecutters/project/",
+    "_template": "../python/cookiecutters/project/",
+    "author": "Szymon Talaga",
+    "copyright_year": "2025",
+    "description": "Analysis of the impact of news feed algorithms' changes on Facebook on user engagement and posting patterns of media organizations.",
+    "development_status": "Development Status :: 4 - Beta",
+    "email": "stalaga@uw.edu.pl",
+    "friendly_name": "Newsuse Project Algorithms",
+    "full_project_name": "newsuse-project-algorithms",
+    "github_owner": "erc-newsuse",
+    "github_repo": "newsuse-project-algorithms",
+    "license": "none",
+    "namespace": "newsuse",
+    "package_name": "project",
+    "project_name": "algorithms",
+    "template_version": "0.1"
+}

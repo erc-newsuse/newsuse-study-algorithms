@@ -1,0 +1,16 @@
+/counts.parquet
+/dataset.parquet
+/timeseries.parquet
+/signal.parquet
+/changepoints.parquet
+/epochs.parquet
+/epoch-meta.parquet
+/text.parquet
+/cls-political.parquet
+/cls-negativity.parquet
+/beast.parquet
+/weekly.parquet
+/non-news.parquet
+/weekly-non-news.parquet
+/news.parquet
+/comscore.parquet

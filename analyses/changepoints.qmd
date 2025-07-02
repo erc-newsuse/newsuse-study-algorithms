@@ -1,0 +1,276 @@
+---
+title: "Changepoints"
+subtitle: "Basic time series"
+author: "Szymon Talaga"
+date: last-modified
+date-format: "MMMM D, YYYY | HH:mm:ss (Z)"
+toc: true
+toc-depth: 3
+toc-location: left
+execute:
+  echo: false
+  warning: false
+  cache: false
+  daemon: false
+format:
+  html:
+    grid:
+      margin-width: 350px
+    embed-resources: true
+  pdf:
+    toc: false
+    number-sections: true
+    colorlinks: true
+reference-location: margin
+citation-location: margin
+---
+
+```{python}
+import importlib
+from typing import Mapping
+import datetime
+import numpy as np
+import pandas as pd
+from scipy import stats
+import matplotlib as mpl
+import matplotlib.dates
+import matplotlib.transforms
+import matplotlib.pyplot as plt
+from matplotlib.patheffects import withStroke
+import seaborn as sns
+import seaborn.objects as so
+from adjustText import adjust_text
+from newsuse.data import DataFrame
+from project import config, paths
+
+mpl.style.use(config.plotting.style)
+mpl.rcParams.update({
+    k: v.make() if isinstance(v, Mapping) and "make!" in v else v
+    for k, v in config.plotting.params.items()
+})
+
+# Get default color cycle here and extract colors
+figpath = paths.figures / "changepoints"
+figpath.mkdir(parents=True, exist_ok=True)
+
+QUALITY = ["low", "medium", "high"]
+COLORS = mpl.rcParams["axes.prop_cycle"].by_key()["color"]
+ELECTIONS = {k: pd.Timestamp(v) for k, v in config.elections.items()}
+```
+
+```{python}
+dataset = (
+    DataFrame.from_(paths.dataset)
+    .merge(
+        DataFrame.from_(paths.epochs),
+        on="key", how="left",
+    )
+)
+```
+
+```{python}
+changepoints = (
+    DataFrame.from_(paths.changepoints)
+    .query(f"subset == '{config.changepoints.use}'")
+    .reset_index(drop=True)
+)
+```
+
+```{python}
+epochs = DataFrame.from_(paths.epochmeta).reset_index(names="epoch")
+```
+
+```{python}
+events = DataFrame.from_(paths.events)
+```
+
+## Signal (conditional expectations averaged over outlets)
+
+```{python}
+signal = (
+    DataFrame.from_(
+        paths.signal,
+        columns=["timestamp", "reactions_rel_mu", "reactions_rel_cv"]
+    )
+    .assign(reactions_rel_mu=lambda df: np.exp(df["reactions_rel_mu"]))
+    .set_index("timestamp")
+)
+```
+
+```{python}
+fig, axes = plt.subplots(
+    figsize=(7.5, 3),
+    nrows=2,
+)
+
+data = epochs
+idx = data["start"].idxmin()
+data.loc[idx, "start"] -= pd.Timedelta(days=180)
+data.loc[idx, "mid"] -= pd.Timedelta(days=90)
+idx = data["end"].idxmax()
+data.loc[idx, "end"] += pd.Timedelta(days=180)
+data.loc[idx, "mid"] += pd.Timedelta(days=90)
+
+def mark_events(signal, events, ax):
+    # Mark events
+    texts = []
+    for _, row in events.iterrows():
+        chp, event, ts, typ = row[["Changepoint", "Event", "Date", "Type"]]
+        if pd.isnull(ts):
+            continue
+        sts = (ts - pd.Timedelta(days=ts.weekday())).date()
+        ypos = signal[sts]
+        ax.scatter(
+            ts, ypos,
+            marker="*", s=100, zorder=20,
+            color="black" if typ == "algorithmic" else "white",
+            edgecolor="white" if typ == "algorithmic" else "black",
+            linewidth=0.5,
+        )
+        text = ax.annotate(
+            f"{chp}{event}", (ts, ypos*1),
+            ha="center", va="bottom",
+            fontsize=7, color="k",
+            fontweight="bold" if typ == "algorithmic" else "normal",
+            xycoords="data",
+            path_effects=[
+                withStroke(linewidth=1.5, foreground="white", alpha=0.8)
+            ],
+            bbox=dict(
+                facecolor="white", alpha=0.8, edgecolor="none",
+                boxstyle="round,pad=0.1"
+            ),
+            zorder=25,
+        )
+        texts.append(text)
+    _ =adjust_text(
+        texts, expand_axes=True, ax=ax,
+        only_move={"text": "y"},
+    )
+
+# Mu signal ===========================
+ax = axes[0]
+
+S = signal["reactions_rel_mu"]
+color_mu = COLORS[-4]
+ax.plot(S.index, S, color=color_mu)
+
+xticks = changepoints["timestamp"]
+ax_top = ax.secondary_xaxis("top")
+ax_top.set_xticks(xticks)
+ax_top.set_xticklabels(
+    xticks.dt.strftime("%m.%d"),
+    fontsize=6,
+)
+
+ax.set_xlabel(None)
+ax.set_ylabel("Relative mean")
+ax.set_yscale("log", base=2)
+
+ax.tick_params(bottom=True, labelbottom=True, labelsize=8)
+
+# Move xticks a bit to the bottom
+ax.xaxis.set_tick_params(pad=10)
+# Mark events
+mark_events(S, events, ax)
+
+# Plot CV signal ==========================
+ax = axes[1]
+color_cv = COLORS[-2]
+S = signal["reactions_rel_cv"]
+ax.plot(S.index, S, color=color_cv, zorder=10)
+ax.set_ylim(.9, 2.15)
+ax.set_yscale("log", base=2)
+ax.set_ylabel("Dispersion")
+
+ax.set_xticks(xticks)
+ax.tick_params(labelsize=8)
+ax.set_xticklabels(
+    xticks.dt.strftime("%m.%d"),
+    fontsize=6,
+)
+
+ax_top = ax.secondary_xaxis("top")
+ax_top.set_xticks(axes[0].get_xticks())
+ax_top.set_xticklabels([])
+# Mark events
+mark_events(S, events, ax)
+
+# Final touches ==========================
+for ax in axes.flat:
+    for ts, l, r in changepoints[["timestamp", "left", "right"]].itertuples(index=False):
+        ax.axvspan(l, r, color="black", alpha=.1)
+        ax.axvline(ts, ls=":", color="k", lw=.5)
+
+# Legend
+ax = axes[0]
+handles = [
+    mpl.lines.Line2D(
+        [], [],
+        color="black",
+        marker="*", markersize=15, markeredgecolor="white",
+        label="algorithmic"
+    ),
+    mpl.lines.Line2D(
+        [], [],
+        color="white",
+        marker="*", markersize=10, markeredgecolor="black",
+        label="political"
+    ),
+]
+legend = ax.legend(
+    handles=handles,
+    ncol=len(handles),
+    loc="lower left",
+    prop={"size": 8},
+    frameon=True,
+    framealpha=1,
+)
+for text in legend.get_texts():
+    if text.get_text() == "political":
+        text.set_fontweight("normal")
+    else:
+        text.set_fontweight("bold")
+
+fig.tight_layout()
+fig.savefig(figpath / "changepoints.pdf")
+```
+
+## Table
+
+```{python}
+def boldformat(row):
+    F = row.copy()
+    if pd.notnull(row["Type"]) and row["Type"] == "algorithmic":
+        F[:] = "font-weight: bold"
+        return F
+    return pd.Series(index=row.index)
+
+E = events.copy()
+E["Timestamp"] = E["Timestamp"].dt.date
+E["Lower bound"] = E["Lower bound"].dt.date
+E["Upper bound"] = E["Upper bound"].dt.date
+E["Date"] = E["Date"].dt.date
+
+(
+    E
+    .set_index([
+        "Changepoint", "Timestamp",
+        "Lower bound", "Upper bound",
+        "Event",
+    ])
+    .style
+    # apply bold formatting to rows with 'Type == 'algorithmic'
+    .apply(boldformat, axis=1)
+    .format(escape="latex", na_rep="")
+    .pipe(
+        lambda df: print(df.to_latex(
+            convert_css=True,
+            hrules=True,
+            multicol_align="c",
+            multirow_align="t",
+            siunitx=False,
+        ))
+    )
+)
+```

@@ -1,0 +1,217 @@
+---
+title: "Ruling out alternative explanations"
+author: "Szymon Talaga"
+date: last-modified
+date-format: "MMMM D, YYYY | HH:mm:ss (Z)"
+toc: true
+toc-depth: 3
+toc-location: left
+execute:
+  echo: false
+  warning: false
+  cache: false
+  daemon: false
+format:
+  html:
+    grid:
+      margin-width: 350px
+    embed-resources: true
+  pdf:
+    toc: false
+    number-sections: true
+    colorlinks: true
+reference-location: margin
+citation-location: margin
+---
+
+```{python}
+import importlib
+from typing import Mapping
+import datetime
+import numpy as np
+import pandas as pd
+from scipy import stats
+import matplotlib as mpl
+import matplotlib.dates
+import matplotlib.transforms
+import matplotlib.pyplot as plt
+from matplotlib.patheffects import withStroke
+import seaborn as sns
+import seaborn.objects as so
+from adjustText import adjust_text
+from newsuse.data import DataFrame
+from project import config, paths
+
+mpl.style.use(config.plotting.style)
+mpl.rcParams.update({
+    k: v.make() if isinstance(v, Mapping) and "make!" in v else v
+    for k, v in config.plotting.params.items()
+})
+
+# Get default color cycle here and extract colors
+figpath = paths.figures / "alternatives"
+figpath.mkdir(parents=True, exist_ok=True)
+
+QUALITY = ["low", "medium", "high"]
+QCAT    = [*QUALITY, "non-news"]
+COLORS  = mpl.rcParams["axes.prop_cycle"].by_key()["color"]
+CMAP    = dict(zip(QCAT, COLORS, strict=False))
+
+COVID_US = pd.Timestamp("2020-01-19")
+```
+
+```{python}
+comscore = (
+    DataFrame.from_(paths.comscore)
+    .set_index(["name", "date"])
+    .groupby(level="name")
+    .apply(
+        lambda df: (
+            df
+            .assign(rel=df["comscore"] / df["comscore"].mean())
+        )
+    )
+    .reset_index(level=0, drop=True)
+)
+statista = (
+    DataFrame.from_(paths.statista)
+    .assign(
+        date=lambda df: (
+            pd.Series([pd.Timestamp(y, 1, 1) for y in df.pop("year")])
+            .dt.date
+        )
+    )
+    .set_index("date")["users"]
+)
+```
+
+```{python}
+reactions = (
+    DataFrame.from_(paths.timeseries)
+    .query("sector.eq('news')")
+    .set_index("timestamp")
+    .groupby(["country", "name"])
+    ["reactions"]
+    .rolling(4, min_periods=4)
+    .mean()
+    .dropna()
+    .reset_index()
+    .groupby(["country", "name"])
+    .apply(
+        lambda df: df.assign(
+            rel=df["reactions"] / df["reactions"].mean()
+        )
+    )
+    .reset_index(drop=True)
+    .groupby(["timestamp"])
+    ["rel"]
+    .mean()
+)
+```
+
+```{python}
+data = (
+    comscore
+    .dropna()
+    .groupby(level="date")
+    .agg(["mean", "size"])
+)
+```
+
+```{python}
+events = pd.concat(
+    [
+        DataFrame(
+            {
+                "Changepoint": ["Cov"],
+                "Timestamp": [COVID_US],
+                "Description": ["1st Covid case in the U.S."],
+            }
+        ),
+        DataFrame.from_(paths.events)
+        .set_index(["Changepoint", "Event"])
+        .loc[[(5, "b"), (7, "a"), (7, "b"), (9, "a"), (9, "b"), (11, "a")]]
+        .reset_index(drop=False),
+    ]
+)
+```
+
+## Plot time series
+
+```{python}
+fig, axes = plt.subplots(figsize=(4, 3), nrows=2, sharex=True, sharey=True)
+
+X = data[("rel", "mean")].rolling(3, min_periods=3).mean()
+Y = (
+    reactions
+    .rolling(3, min_periods=3)
+    .mean()
+    .resample("MS")
+    .mean()
+)
+Y.index = Y.index.to_series().dt.date
+
+for i, axx in enumerate(zip(axes.flat, [X, Y], strict=True)):
+    ax, x = axx
+    label = "Unique visitors" if i == 0 else "Reactions"
+    color = COLORS[i]
+    ax.plot(x.index, x, label=label, color=color)
+    ax.legend(
+        handlelength=1.5,
+        frameon=False,
+    )
+    ax.yaxis.set_major_formatter(mpl.ticker.PercentFormatter(1.0))
+    ax.tick_params(labelsize=8)
+    ax.set_xlim(right=events["Timestamp"].max() + datetime.timedelta(days=90))
+    texts = []
+    for _, row in events.iterrows():
+        ts, change, event = row[["Timestamp", "Changepoint", "Event"]]
+        if pd.isnull(event):
+            event = ""
+        date = datetime.date(ts.year, ts.month, 1)
+        if date in x.index:
+            ypos = x.loc[date]
+        else:
+            ypos = x.iloc[-1]
+        text = ax.annotate(
+            f"{change}{event}",
+            xy=(ts, ypos),
+            ha="center", va="center",
+            fontsize=7,
+            fontweight="bold",
+            color="black",
+            path_effects=[withStroke(linewidth=2, foreground="w")],
+        )
+        texts.append(text)
+    _ = adjust_text(texts, ax=ax)
+
+fig.supylabel(
+    "Value / overall mean",
+    fontsize="medium", x=.05
+)
+fig.tight_layout()
+fig.savefig(figpath / "comscore.pdf")
+```
+
+```{python}
+fig, ax = plt.subplots(figsize=(3, 4))
+
+users = statista / statista.to_numpy()[0]
+
+ax.plot(
+    users.index, users,
+    marker="o", color=COLORS[2],
+    label="Facebook users\n(relative to 2019)"
+)
+ax.xaxis.set_major_locator(mpl.dates.YearLocator(2))
+ax.yaxis.set_major_formatter(mpl.ticker.PercentFormatter(1.0))
+ax.legend(
+    handlelength=1.5,
+    frameon=False,
+    fontsize="medium",
+    loc="lower right",
+)
+
+fig.tight_layout()
+fig.savefig(figpath / "statista.pdf")
+```

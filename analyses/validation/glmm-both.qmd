@@ -1,0 +1,305 @@
+---
+title: "Validation of the regression model"
+subtitle: "for news and non-news posts with changepoints"
+author: "Szymon Talaga"
+date: last-modified
+date-format: "MMMM D, YYYY | HH:mm:ss (Z)"
+toc: true
+toc-depth: 3
+toc-location: left
+execute:
+  echo: false
+  warning: false
+  cache: false
+  daemon: false
+format:
+  html:
+    grid:
+      margin-width: 350px
+    embed-resources: true
+  pdf:
+    toc: false
+    number-sections: true
+    colorlinks: true
+reference-location: margin
+citation-location: margin
+---
+
+```{r}
+library(arrow)
+library(stringr)
+library(dplyr)
+library(purrr)
+library(tibble)
+library(tidyr)
+library(emmeans)
+library(broom)
+library(reticulate)
+library(lubridate)
+library(glmmTMB)
+
+use_condaenv("newsuse-study-algorithms")
+
+project <- import("project")
+config  <- project$config
+paths   <- project$paths[["__copy__"]]()
+
+alpha     <- config$inference$alpha
+conf      <- config$inference$conf
+adjust    <- config$inference$adjust
+
+emm_options(
+    emmeans  = list(type = "response", level = conf, adjust = adjust),
+    contrast = list(adjust = adjust),
+    summary  = list(infer = TRUE)
+)
+```
+
+```{python}
+import importlib
+from typing import Mapping
+import datetime
+import numpy as np
+import pandas as pd
+from scipy import stats
+import matplotlib as mpl
+import matplotlib.dates
+import matplotlib.transforms
+import matplotlib.pyplot as plt
+from matplotlib.patheffects import withStroke
+import seaborn as sns
+import seaborn.objects as so
+from project import config, paths
+
+mpl.style.use(config.plotting.style)
+mpl.rcParams.update({
+    k: v.make() if isinstance(v, Mapping) and "make!" in v else v
+    for k, v in config.plotting.params.items()
+})
+
+figpath = paths.figures / "glmm" / "validation" / "both"
+figpath.mkdir(parents=True, exist_ok=True)
+
+QUALITY = ["low", "medium", "high", "non-news"]
+SECTORS = ["news", "non-news"]
+COLORS = mpl.rcParams["axes.prop_cycle"].by_key()["color"]
+CMAP = dict(zip(QUALITY, COLORS, strict=False))
+```
+
+## Main model
+
+```{r}
+glmm <- readRDS(as.character(paths$glmm / "both" / "quality.rds"))
+gc()
+```
+
+```{r}
+data <- as_tibble(glmm$frame) %>%
+    mutate(
+        reactions_pred = predict(glmm, type = "response"),
+        reactions_theta = predict(glmm, type = "disp"),
+    )
+```
+
+```{r}
+desc <- data %>%
+    group_by(name, quality, epoch) %>%
+    summarize(
+        mean  = mean(reactions),
+        std   = sd(reactions),
+        mu    = mean(reactions_pred),
+        sigma = sqrt(mean(reactions_pred * (1 + reactions_pred / reactions_theta))),
+    ) %>%
+    ungroup %>%
+    mutate(rdiff = abs(mean - mu) / mean)
+```
+
+### Observed vs predicted group means
+
+```{python}
+data = (
+    r.desc[["name", "epoch", "rdiff"]]
+    .pivot(index="name", columns="epoch", values="rdiff")
+)
+fig, ax = plt.subplots(figsize=(7,7))
+
+vmax = max(1, data.max().max())
+sns.heatmap(data, vmin=0, vmax=vmax, ax=ax, yticklabels=data.index)
+
+ax.set_xlabel("Epoch")
+ax.set_ylabel(None)
+
+fig.suptitle(
+    "Relative differences (observed vs predicted)",
+    fontsize="large", x=.575, y=.97
+)
+rdiff = data.mean().mean()
+ax.set_title(
+    rf"Average difference $\approx$ {rdiff:.4f}",
+    fontsize="medium", fontweight="normal",
+)
+ax.tick_params(labelsize=7)
+
+fig.tight_layout()
+fig.savefig(figpath / "group-means-rdiffs.pdf")
+```
+
+### Observed vs predicted in quality tiers
+
+```{r}
+pred <- data %>%
+    group_by(quality, epoch) %>%
+    summarize(
+        observed  = mean(reactions),
+        median    = median(reactions),
+        predicted = mean(reactions_pred),
+    ) %>%
+    ungroup
+```
+
+```{python}
+data = r.pred.melt(
+    id_vars=["quality", "epoch"],
+    value_vars=["observed", "predicted"],
+)
+
+fig, ax = plt.subplots(figsize=(7, 3))
+
+(
+    so.Plot(
+        data, x="epoch", y="value",
+        linestyle="variable", marker="variable", color="quality",
+    )
+    .add(so.Line(), so.Dodge(), legend=True)
+    .add(so.Dot(), so.Dodge(), legend=True)
+    .scale(
+        color=so.Nominal(order=QUALITY, values=COLORS),
+        linestyle=so.Nominal(
+            order=["observed", "predicted"], values=["-", "--"]
+        )
+    )
+    .label(
+        color="Quality",
+        linestyle="Value",
+    )
+    .theme({
+        "legend.fontsize": 8,
+        "legend.title_fontsize": 10,
+        "legend.frameon": False,
+    })
+    .on(ax)
+    .plot()
+)
+
+ax.set_yscale("log")
+# ax.set_ylim(10**2, 10**4)
+ax.set_xlabel("Epoch")
+ax.set_ylabel(None)
+
+fig.tight_layout()
+fig.savefig(figpath / "quality-means.pdf")
+```
+
+### Conditional mean effects
+
+```{r}
+re   <- ranef(glmm)$cond
+rdf <- map(names(re)[1L:2L], ~{
+    R  <- re[[.x]]
+    tibble(
+        term=.x,
+        unit = rownames(R),
+        estimate = R[, 1L],
+    )
+}) %>%
+    bind_rows
+```
+
+```{python}
+fig, axes = plt.subplots(
+    figsize=(7, 3),
+    ncols=2,
+    sharex=True,
+    sharey=True,
+)
+
+for ax, gdf in zip(axes.flat, r.rdf.groupby("term"), strict=True):
+    term, gdf = gdf
+    term = term.replace("country:sector:name", "outlet")
+    sns.kdeplot(
+        gdf,
+        x="estimate",
+        fill=True,
+        ax=ax
+    )
+    ax.annotate(
+        term, xy=(0.05, 0.95), xycoords="axes fraction",
+        fontsize="large", ha="left", va="top",
+        bbox={"facecolor": "white"}
+    )
+    ax.set_xlabel(None)
+    ax.set_ylabel(None)
+    ax.axvline(
+        0, color="black", linestyle="--", linewidth=1, zorder=0,
+    )
+    ax.set_xlim(-4.2, 4.2)
+    ax.set_ylim(0, 1)
+
+fig.supxlabel("Random effect estimate", y=.07, fontsize="large"),
+axes.flatten()[0].set_ylabel("Density", fontsize="large")
+
+fig.tight_layout()
+fig.savefig(figpath / "cond-re.pdf")
+```
+
+### Dispersion random effects
+
+```{r}
+re  <- ranef(glmm)$disp
+rdf <- map(names(re)[1L:2L], ~{
+    R  <- re[[.x]]
+    tibble(
+        term=.x,
+        unit = rownames(R),
+        estimate = R[, 1L],
+    )
+}) %>%
+    bind_rows
+```
+
+```{python}
+fig, axes = plt.subplots(
+    figsize=(7, 3),
+    ncols=2,
+    sharex=True,
+    sharey=True,
+)
+
+for ax, gdf in zip(axes.flat, r.rdf.groupby("term"), strict=True):
+    term, gdf = gdf
+    term = term.replace("country:sector:name", "outlet")
+    sns.kdeplot(
+        gdf,
+        x="estimate",
+        fill=True,
+        ax=ax
+    )
+    ax.annotate(
+        term, xy=(0.05, 0.95), xycoords="axes fraction",
+        fontsize="large", ha="left", va="top",
+        bbox={"facecolor": "white"}
+    )
+    ax.set_xlabel(None)
+    ax.set_ylabel(None)
+    ax.axvline(
+        0, color="black", linestyle="--", linewidth=1, zorder=0,
+    )
+    ax.set_xlim(-4.2, 4.2)
+    ax.set_ylim(0, .6)
+
+fig.supxlabel("Random effect estimate", y=.07, fontsize="large"),
+axes.flatten()[0].set_ylabel("Density", fontsize="large")
+
+fig.tight_layout()
+fig.savefig(figpath / "disp-re.pdf")
+```

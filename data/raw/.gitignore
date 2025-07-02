@@ -1,0 +1,12 @@
+/metadata.parquet
+/non-news-content.parquet
+/events.xlsx
+/news-us.parquet
+/non-news-us.parquet
+/content-news-us.parquet
+/content-non-news-us.parquet
+/imputed-reactions.parquet
+/comscore.parquet
+/paramount.parquet
+/paramount-content.parquet
+/statista-facebook-users.xlsx

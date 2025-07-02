@@ -1,0 +1,1080 @@
+---
+title: "Generalized linear mixed model"
+subtitle: "for news and non-news posts with changepoints"
+author: "Szymon Talaga"
+date: last-modified
+date-format: "MMMM D, YYYY | HH:mm:ss (Z)"
+toc: true
+toc-depth: 3
+toc-location: left
+execute:
+  echo: false
+  warning: false
+  cache: false
+  daemon: false
+format:
+  html:
+    grid:
+      margin-width: 350px
+    embed-resources: true
+  pdf:
+    toc: false
+    number-sections: true
+    colorlinks: true
+reference-location: margin
+citation-location: margin
+---
+
+```{r}
+library(arrow)
+library(stringr)
+library(dplyr)
+library(purrr)
+library(tibble)
+library(emmeans)
+library(broom)
+library(reticulate)
+library(lubridate)
+library(glmmTMB)
+
+use_condaenv("newsuse-study-algorithms")
+
+project <- import("project")
+config  <- project$config
+paths   <- project$paths[["__copy__"]]()
+
+alpha     <- config$inference$alpha
+conf      <- config$inference$conf
+adjust    <- config$inference$adjust
+
+emm_options(
+    emmeans  = list(type = "response", level = conf, adjust = adjust),
+    contrast = list(adjust = adjust),
+    summary  = list(infer = TRUE),
+    mvt.args = list(abseps = 1e-4)
+)
+```
+
+```{python}
+import importlib
+from typing import Mapping
+import datetime
+import numpy as np
+import pandas as pd
+from scipy import stats
+import matplotlib as mpl
+import matplotlib.dates
+import matplotlib.transforms
+import matplotlib.pyplot as plt
+from matplotlib.patheffects import withStroke
+import seaborn as sns
+import seaborn.objects as so
+from newsuse.data import DataFrame
+from project import config, paths
+
+mpl.style.use(config.plotting.style)
+mpl.rcParams.update({
+    k: v.make() if isinstance(v, Mapping) and "make!" in v else v
+    for k, v in config.plotting.params.items()
+})
+
+# Get default color cycle here and extract colors
+figpath = paths.figures / "glmm" / "both"
+figpath.mkdir(parents=True, exist_ok=True)
+
+SECTORS   = ["non-news", "news"]
+QUALITY   = ["non-news", "low", "medium", "high"]
+COLORS    = mpl.rcParams["axes.prop_cycle"].by_key()["color"]
+ELECTIONS = {k: pd.Timestamp(v) for k, v in config.elections.items()}
+
+LAST_EPOCH = 11
+LAST_NONALGO_EPOCH = 4
+```
+
+```{r}
+glmm <- readRDS(as.character(paths$glmm / "both" / "quality.rds"))
+```
+
+```{r}
+dataset <- tibble(glmm$frame)
+```
+
+```{r}
+epochs <- as.character(paths$epochmeta) %>%
+    read_parquet %>%
+    mutate(epoch = 0L:(n() - 1L), .before = 1L)
+
+changepoints <- as.character(paths$changepoints) %>%
+    read_parquet %>%
+    filter(subset == config$changepoints$use)
+```
+
+## Main analysis
+
+```{r}
+obs <- dataset %>%
+    group_by(name, sector, quality, epoch) %>%
+    summarize(n = n(), reactions = mean(reactions)) %>%
+    ungroup
+```
+
+```{r}
+extract_outlet_re <- function(re, term) {
+    parts <- str_split(term, ":", simplify = FALSE)[[1L]]
+    estim <- re[[term]]
+    rdf   <- tibble(term = rownames(estim), estimate = estim[, 1L])
+    for (i in seq_along(parts)) {
+        rdf[[parts[i]]] <- str_split_i(rdf[["term"]], ":", i)
+    }
+    select(rdf, !!!parts, estimate)
+}
+```
+
+```{r}
+re  <- ranef(glmm)
+qdf <- dataset %>%
+    select(name, quality) %>%
+    distinct
+
+re_cond_o <- extract_outlet_re(re$cond, "country:sector:name")
+re_cond_e <- extract_outlet_re(re$cond, "country:sector:name:epoch")
+re_cond <- left_join(
+    rename(re_cond_o, mu_outlet = estimate),
+    rename(re_cond_e, mu_epoch = estimate),
+    by = c("country", "sector", "name")
+) %>%
+    mutate(
+        epoch = as.integer(epoch),
+        mu = mu_outlet + mu_epoch,
+    ) %>%
+    left_join(qdf)
+
+rdf <- re_cond %>%
+    mutate(quality = factor(quality, levels = py$QUALITY)) %>%
+    group_by(quality, epoch) %>%
+    summarize(mu = exp(var(mu)/2)) %>%
+    ungroup %>%
+    arrange(epoch, quality)
+```
+
+```{r}
+rg <- ref_grid(glmm, data = glmm$frame)
+
+# Update regression coefficients in the reference grid
+# so they satisfy:
+# X(b + o) = mu + sigma^2_b / 2
+# This way the estimated marginal means will account for
+# the heterogeneity of the outlet effects.
+# This works because when the link function is log,
+# and random effects are Gaussian, then the distribution
+# of the response accounting for the random effects is log-normal.
+offset <- rg@grid %>%
+    mutate(epoch = as.integer(as.character(epoch))) %>%
+    left_join(rdf) %>%
+    mutate(mu = log(mu)) %>%
+    pull(mu)
+rg@bhat <- rg@bhat + solve(rg@linfct, offset)
+```
+
+```{r}
+# Use 'non-news' as the reference level for 'quality' factor
+rg <- permute_levels(rg, "quality", c(
+    which(rg@levels$quality == "non-news"),
+    which(rg@levels$quality == "low"),
+    which(rg@levels$quality == "medium"),
+    which(rg@levels$quality == "high")
+))
+sectors <- factor(
+    c("non-news", "news", "news", "news"),
+    levels = c("non-news", "news")
+)
+srg <- add_grouping(rg, "sector", "quality", sectors)
+erg <- srg
+```
+
+```{r}
+emm   <- emmeans(erg, ~epoch)
+emm_s <- emmeans(erg, ~epoch * sector)
+emm_q <- emmeans(rg, ~epoch * quality)
+
+con   <- contrast(emm, method = "consec")
+con_s <- contrast(emm_s, method = "consec", by = "sector")
+con_si <- contrast(emm_s, interaction = c("consec", "consec"))
+
+.tidy <- function(df, conf.int = TRUE, ...) {
+    tidy(df, conf.int = conf.int, ...)
+}
+
+edf    <- .tidy(emm)
+edf_s  <- .tidy(emm_s)
+
+cdf     <- .tidy(con)
+cdf_s   <- .tidy(con_s)
+cdf_si  <- .tidy(con_si)
+```
+
+```{r}
+## Custom contrasts for comparing against epochs 1-4
+cvec <- function(idx) {
+    vec <- c(-rep(1/4, 4L), rep(0, 8L))
+    vec[idx+1L] <- vec[idx+1L] + 1
+    vec
+}
+C <- lmap(0L:py$LAST_EPOCH, ~{
+    name <- str_glue("epoch{.x} - epochs[0:{py$LAST_NONALGO_EPOCH}]")
+    rlang::ll(!!name := cvec(.x))
+})
+
+con_e  <- contrast(emm_s, method = C, by = "sector")
+con_ei <- contrast(emm_s, interaction = list(C, "consec"))
+
+con_q   <- contrast(emm_q, method = C, by = "quality")
+con_qs  <- contrast(emm_q, method = "consec", by = "quality")
+con_qi  <- contrast(emm_q, interaction = list(C, "trt.vs.ctrl"))
+
+cdf_e   <- .tidy(con_e)
+cdf_ei  <- .tidy(con_ei)
+```
+
+
+### Estimated marginal means
+
+```{python}
+sector_colorscale = so.Nominal(
+    order=SECTORS,
+    values=[COLORS[3], COLORS[0]],
+)
+quality_colorscale = so.Nominal(
+    order=QUALITY,
+    values=COLORS[:len(QUALITY)],
+)
+fig, ax = plt.subplots(figsize=(7.5, 3))
+
+# Outlet-epoch averages ============================
+data = (
+    r.obs
+    .assign(
+        epoch=lambda df: df["epoch"].astype(int),
+        sector=lambda df: df["sector"].replace("other", "non-news"),
+    )
+    .merge(r.epochs, on="epoch")
+)
+(
+    so.Plot(data, x="mid", y="reactions", color="sector")
+    .add(
+        so.Dots(), so.Jitter(x=14, seed=17), so.Dodge(),
+        pointsize="n", legend=False
+    )
+    .scale(
+        pointsize=so.Continuous(trans="sqrt"),
+        color=sector_colorscale,
+    )
+    .theme(mpl.rcParams)
+    .on(ax)
+    .plot()
+)
+
+epochs = r.epochs
+data = epochs
+idx = data["start"].idxmin()
+data.loc[idx, "start"] -= pd.Timedelta(days=180)
+data.loc[idx, "mid"] -= pd.Timedelta(days=90)
+idx = data["end"].idxmax()
+data.loc[idx, "end"] += pd.Timedelta(days=180)
+data.loc[idx, "mid"] += pd.Timedelta(days=90)
+
+ax.set_xlim(data["start"].min(), data["end"].max())
+
+xticks = epochs["start"]
+ax_top = ax.secondary_xaxis("top")
+ax_top.set_xticks(xticks)
+ax_top.set_xticklabels(
+    xticks.dt.strftime("%m.%d"),
+    fontsize=6,
+)
+ax_top.set_xlabel(None)
+
+data = (
+    r.edf_s
+    .assign(
+        epoch=lambda df: df["epoch"].astype(int),
+        sector=lambda df: df["sector"].replace("other", "non-news"),
+    )
+    .merge(r.epochs, on="epoch")
+)
+(
+    so.Plot(data, x="mid", y="response", color="sector")
+    .add(
+        so.Range(linewidth=2, color="black"), so.Dodge(),
+        ymin="conf.low", ymax="conf.high", legend=False,
+    )
+    .add(
+        so.Line(
+            artist_kws={"zorder": 1},
+            linestyle=":",
+        ),
+        so.Dodge(),
+        legend=False,
+    )
+    .add(
+        so.Dot(
+            artist_kws={"zorder": 10},
+            edgecolor="black",
+            pointsize=7,
+            marker="s",
+        ),
+        so.Dodge(),
+        legend=False,
+    )
+    .scale(color=sector_colorscale)
+    .on(ax)
+    .plot()
+)
+
+# Algo epoch contrasts significance ============
+
+data["ratio"] = r.cdf_ei["ratio"]
+data["pv"] = r.cdf_ei["adj.p.value"]
+texts = []
+for idx, row in (
+    data.query(f"pv <= {r.alpha}")
+    .reset_index(drop=True)
+    .iterrows()
+):
+    fields = ["ratio", "pv", "mid", "start", "end"]
+    ratio, pv, mid, start, end = row[fields]
+    pvs = rf"\approx {pv:.3f}" if pv >= 0.001 else "< 0.001"
+    # ax.axvspan(begin, end, color="gray", alpha=.2, zorder=-10)
+    text = ax.annotate(
+        rf"$p {pvs}$", (mid, 10**4.85),
+        fontsize=5, ha="center",
+        path_effects=[withStroke(foreground="white", linewidth=2)],
+
+    )
+    target, source = 4.8, 4.3
+    increase = ratio > 1
+    if increase:
+        target, source = source, target
+    ax.annotate(
+        "",
+        xy=(mid, 10**source),
+        xytext=(mid, 10**target),
+        xycoords="data",
+        arrowprops={
+            "arrowstyle": "->",
+            "connectionstyle": "arc3",
+            "color": "black" if increase else "red",
+        },
+    )
+    texts.append(text)
+    if idx == 0:
+        ax.annotate(
+            r"Cumulative causal effects",
+            (mid, 10**5.1),
+            fontsize=5.5,
+            fontweight="bold",
+            ha="center",
+            bbox={"facecolor": "white", "pad": 2},
+        )
+
+# Sequential interaction contrast significance ====================
+
+sdata = (
+    r.cdf_si
+    .assign(
+        epoch1=lambda df:
+            df["epoch_consec"].str.extract(r"(\d+)$").astype(int),
+        epoch2=lambda df:
+            df["epoch_consec"].str.extract(r"^(\d+)").astype(int),
+    )
+    .merge(
+        epochs[["epoch", "mid"]].rename(columns={"mid": "mid1"}),
+        left_on="epoch1", right_on="epoch"
+    )
+    .merge(
+        epochs[["epoch", "mid"]].rename(columns={"mid": "mid2"}),
+        left_on="epoch2", right_on="epoch",
+    )
+    .rename(columns={"adj.p.value": "pv"})
+    .query(f"pv <= {r.alpha}")
+    .reset_index(drop=True)
+)
+
+counter = 0
+seqy = 10
+for idx, row in sdata.iterrows():
+    ratio, pv, mid1, mid2 = row[["ratio", "pv", "mid1", "mid2"]]
+    epoch1, epoch2 = row[["epoch1", "epoch2"]]
+    sig = (
+        r"$p \lessapprox 0.001$" if pv <= 0.00155
+        else rf"$p \approx {pv:.3f}$"
+    )
+    ax.annotate(
+        "",
+        xy=(mid2, seqy),
+        xytext=(mid1, seqy),
+        xycoords="data",
+        textcoords="data",
+        arrowprops={
+            "arrowstyle": "->",
+            "connectionstyle": "arc3",
+            "color": "black" if ratio > 1 else "red",
+        }
+    )
+    mid = mid1 + (mid2 - mid1) / 2
+    ax.annotate(
+        sig,
+        xy=(mid, seqy+5),
+        ha="center",
+        fontsize=5,
+        path_effects=[withStroke(foreground="white", linewidth=2)]
+    )
+    if idx == 0:
+        ax.annotate(
+            "Difference-in-difference",
+            xy=(mid, 5.5),
+            ha="center",
+            fontsize=5.5,
+            fontweight="bold",
+            bbox={"facecolor": "white", "pad": 2}
+        )
+    if int(epoch2) - int(epoch1) > 1:
+        lo, hi = row[["conf.low", "conf.high"]]
+        ax.annotate(
+            rf"$MR \approx {ratio:.2f}$"
+            "\n"
+            rf"${r.conf*100:.0f}\%: [{lo:.2f}, {hi:.2f}]$",
+            xy=(mid - pd.Timedelta(days=180), seqy-4),
+            ha="left",
+            va="center",
+            fontsize=5,
+            bbox={"facecolor": "white", "pad": 2, "lw": .01},
+        )
+
+
+# Final touches ===========================================
+ax.set_yscale("log")
+ax.set_ylim(top=10**5.1)
+ax.set_xlabel(None)
+ax.set_ylabel("Reactions per post")
+
+for ts in r.changepoints["timestamp"]:
+    ax.axvline(ts, ls=":", color="k", lw=.5)
+# Mark elections
+# for election, ts in ELECTIONS.items():
+#     ax.axvline(ts, color="gold", lw=2.5, zorder=0)
+#     ax.axvline(ts, color="black", lw=.25, zorder=1)
+
+ax.tick_params(labelsize=8)
+
+# Mark period with equiproportional trends
+ypos = 6
+tdf  = epochs.set_index("epoch")
+ts0  = epochs.loc[0, "start"]
+ts1  = epochs.loc[LAST_NONALGO_EPOCH, "end"]
+mid  = ts0 + (ts1 - ts0) / 2
+ax.axvspan(ts0, ts1, color="gray", alpha=.08, zorder=-100)
+ax.annotate(
+    "Equiproportional trends",
+    xy=(mid, 5.5), ha="center", fontsize=6,
+    fontweight="bold", zorder=100,
+    bbox={"facecolor": "white", "pad": 2, "lw": .01},
+)
+ax.annotate(
+    "", (ts0, ypos), xytext=(mid, ypos),
+    xycoords="data", textcoords="data",
+    arrowprops={
+        "arrowstyle": "->",
+        "connectionstyle": "arc3",
+        "color": "black",
+    },
+)
+ax.annotate(
+    "", (ts1, ypos), xytext=(mid, ypos),
+    xycoords="data", textcoords="data",
+    arrowprops={
+        "arrowstyle": "->",
+        "connectionstyle": "arc3",
+        "color": "black",
+    },
+)
+
+# Make custom legend handles
+sector_handles = [
+    mpl.lines.Line2D(
+        [0], [0], color=color,
+        marker="s", linestyle="",
+        markersize=6, label=quality.title(),
+    )
+    for color, quality in zip(
+        sector_colorscale.values,
+        sector_colorscale.order,
+        strict=True,
+    )
+]
+other_handles = [
+    # Legend item for sector-epoch means
+    mpl.lines.Line2D(
+        [0], [0], color="white", markeredgecolor="black",
+        marker="s", linestyle="",
+        markersize=6, label="Estimated marginal mean",
+    ),
+    # Legend item for outlet-epoch means
+    mpl.lines.Line2D(
+        [0], [0], color="black", marker="o", linestyle="",
+        alpha=.25,
+        markersize=6, label="Outlet-epoch mean",
+    )
+]
+sector_legend = fig.legend(
+    handles=sector_handles,
+    ncols=len(sector_handles),
+    bbox_to_anchor=(0.075, -.02),
+    loc="center left",
+    fontsize=9,
+    frameon=False,
+)
+fig.add_artist(sector_legend)
+other_legend = fig.legend(
+    handles=other_handles,
+    ncols=len(other_handles),
+    bbox_to_anchor=(1, -.02),
+    loc="center right",
+    fontsize=9,
+    frameon=False,
+)
+
+fig.tight_layout()
+fig.savefig(figpath / "both-emmeans.pdf")
+```
+
+```{python}
+MAIN_COLOR = COLORS[-1]
+
+fig, ax = plt.subplots(figsize=(7.5, 2))
+data = (
+    r.cdf_ei
+    .reset_index(drop=True)
+    .assign(
+        epoch=epochs["epoch"].tolist(),
+        mid=epochs["mid"].tolist(),
+    )
+)
+(
+    so.Plot(data, x="mid", y="ratio")
+    .add(so.Line(linestyle=":", color=MAIN_COLOR), legend=False)
+    .add(
+        so.Range(linewidth=2, color="black"),
+        ymin="conf.low", ymax="conf.high", legend=False,
+    )
+    .add(
+        so.Dot(
+            artist_kws={"zorder": 10},
+            color=MAIN_COLOR,
+            edgecolor="black",
+            pointsize=7,
+            marker="s",
+        ),
+        so.Dodge(),
+        legend=False,
+    )
+    .on(ax)
+    .plot()
+)
+cdf_eqs = (
+    r.cdf_si
+    .reset_index(drop=True)
+    .assign(
+        x=epochs[1:]["start"].tolist(),
+        increase=lambda df: np.where(
+            df["ratio"] > 1, "increase", "deacrease"
+        ),
+    )
+    .assign(increase=lambda df: np.where(
+        df["adj.p.value"] <= r.alpha, df["increase"], "ns"
+    ))
+)
+increase_order = ["increase", "deacrease", "ns"]
+(
+    so.Plot(cdf_eqs, x="x", y="ratio", color="increase")
+    .add(
+        so.Range(linewidth=2, color="black"),
+        ymin="conf.low", ymax="conf.high", legend=False,
+    )
+    .add(
+        so.Dot(artist_kws={"zorder": 10}),
+        edgecolor="increase",
+        pointsize="increase",
+        color="increase",
+        marker="increase",
+        legend=False,
+    )
+    .scale(
+        color=so.Nominal(
+            order=increase_order,
+            values=["black", "red", "white"],
+        ),
+        edgecolor=so.Nominal(
+            order=increase_order,
+            values=["white", "white", "black"],
+        ),
+        marker=so.Nominal(
+            order=increase_order,
+            values=["^", "v", "o"],
+        ),
+        pointsize=so.Nominal(
+            order=increase_order,
+            values=[10, 10, 7],
+        ),
+    )
+    .on(ax)
+    .plot()
+)
+
+ax.axhline(1, ls="--", color="k", lw=.5, zorder=-10)
+ax.set_yscale("log")
+ax.set_ylim(10**-1.5, 10**1)
+
+ax.set_xlabel(None)
+ax.set_ylabel("News / Non-news")
+ax.tick_params(labelsize=8)
+
+for ts in r.changepoints["timestamp"]:
+    ax.axvline(ts, ls=":", color="k", lw=.5)
+# Mark elections
+# for election, ts in ELECTIONS.items():
+#     ax.axvline(ts, color="gold", lw=2.5, zorder=0)
+#     ax.axvline(ts, color="black", lw=.25, zorder=1)
+
+# Mark period with equiproportional trends
+ypos = 6
+tdf  = epochs.set_index("epoch")
+ts0  = epochs.loc[0, "start"]
+ts1  = epochs.loc[LAST_NONALGO_EPOCH, "end"]
+ax.axvspan(ts0, ts1, color="gray", alpha=.08, zorder=-100)
+ax.set_xlim(ts0, epochs.loc[11, "end"])
+
+eff_handles = [
+    mpl.lines.Line2D(
+        [0], [0], color=MAIN_COLOR, marker="s", linestyle="",
+        markersize=6, label=f"Epoch / Epochs 0-{LAST_NONALGO_EPOCH}",
+    ),
+    # Legedn item for confidence intervals
+    mpl.lines.Line2D(
+        [0], [0], color="black", marker="|", linestyle="",
+        markersize=10, markeredgewidth=2, label=f"{r.conf:.0%} CI",
+    ),
+]
+
+eff_legend = fig.legend(
+    handles=eff_handles,
+    ncols=len(eff_handles),
+    bbox_to_anchor=(0.25, -.02),
+    loc="center",
+    fontsize=9,
+    frameon=False,
+)
+
+fig.add_artist(eff_legend)
+
+seq_legend = [
+    # Label 'Sequential'
+    mpl.lines.Line2D(
+        [0], [0], color="black", marker="none", linestyle="",
+        markersize=8, label="Sequential",
+    ),
+    mpl.lines.Line2D(
+        [0], [0], color="black", marker="^", linestyle="",
+        markersize=10, label="Increase", markeredgecolor="white",
+    ),
+    mpl.lines.Line2D(
+        [0], [0], color="red", marker="v", linestyle="",
+        markersize=10, label="Decrease", markeredgecolor="white",
+    ),
+    mpl.lines.Line2D(
+        [0], [0], color="white", marker="o", linestyle="",
+        markersize=7, label="Not significant",
+    ),
+]
+fig.legend(
+    handles=seq_legend,
+    ncols=len(seq_legend),
+    bbox_to_anchor=(0.7, -.02),
+    loc="center",
+    fontsize=9,
+    frameon=False,
+)
+
+fig.tight_layout()
+fig.savefig(figpath / "both-contrasts.pdf")
+```
+
+### Parallel trends analysis (or multiplicative equiproportionality)
+
+```{r}
+ptemm <- emmeans(srg, ~epoch * sector, type = "link")
+ptcon <- contrast(ptemm, interaction = c("consec", "consec"))
+ptcdf <- .tidy(ptcon)
+E     <- ptcdf$estimate  # DiD estimates for the first 4 sequential contrasts
+V     <- vcov(con)     # covariance matrix of the first 4 contrasts
+
+parallel_trends_pval <- function(E, V, idx = 1L:length(E)) {
+    E <- E[idx]
+    V <- V[idx, idx]
+    # chi-square test statistic
+    X  <- as.vector(t(E) %*% solve(V) %*% E)
+    df <- length(E) - 1L  # degrees of freedom
+    c(X2 = X, df = df, p = pchisq(X, df = df, lower.tail = FALSE))
+}
+```
+
+```{r}
+rlang::ll(
+    "before 'War on News'" =
+        parallel_trends_pval(E, V, 1L:(py$LAST_NONALGO_EPOCH+1L)),
+    "after 'War on News'"  =
+        parallel_trends_pval(E, V, (py$LAST_NONALGO_EPOCH+2L):length(E)),
+)
+```
+
+
+## Tables
+
+### Estimated marginal means and contrasts
+
+```{python}
+bounds = (
+    r.epochs
+    .assign(
+        start=lambda df: df["start"].dt.strftime("%y.%m.%d"),
+        end=lambda df: df["end"].dt.strftime("%y.%m.%d"),
+        period=lambda df: (
+            df["start"] + "-" + df["end"]
+        ),
+    )
+    [["epoch", "period"]]
+)
+emm = (
+    pd.concat([r.edf_s, r.edf], axis=0, ignore_index=True)
+    .fillna({"sector": "overall"})
+    .assign(
+        epoch=lambda df: df["epoch"].astype(int),
+        sector=lambda df: pd.Categorical(
+            df["sector"],
+            categories=["overall", *SECTORS],
+        )
+    )
+    .merge(bounds)
+    .set_index(["epoch", "period", "sector"])
+    .sort_index()
+    .pipe(
+        lambda df: (
+            DataFrame({
+                "mean": df["response"],
+                f"[{r.alpha/2:.1%}": df["conf.low"],
+                f"{r.conf+r.alpha/2:.1%}]": df["conf.high"],
+            }, index=df.index)
+        )
+    )
+)
+effect = (
+    pd.concat([
+        r.cdf.assign(
+            epoch=lambda df: (
+                df["contrast"]
+                .str.extract(r"epoch(\d+)")
+                .astype(int)
+            ),
+            sector="overall",
+        ),
+        r.cdf_e.assign(
+            epoch=lambda df: (
+                df["contrast"]
+                .str.extract(r"epoch(\d+)")
+                .astype(int)
+            ),
+        )
+    ])
+    .assign(sector=lambda df: pd.Categorical(
+        df["sector"],
+        categories=["overall", *SECTORS],
+    ))
+    .merge(bounds)
+    .set_index(["epoch", "period", "sector"])
+    .sort_index()
+    .pipe(
+        lambda df: DataFrame({
+            "ratio": df["ratio"],
+            f"[{r.alpha/2:.1%}": df["conf.low"],
+            f"{r.conf+r.alpha/2:.1%}]": df["conf.high"],
+            "z": df["statistic"],
+            "p": df["adj.p.value"],
+        }, df.index)
+    )
+)
+seq = (
+    pd.concat([
+        r.cdf
+        .assign(
+            epoch=lambda df: (
+                df["contrast"]
+                .str.extract(r"^epoch(\d+)")
+                .astype(int)
+            ),
+            sector="overall",
+        ),
+        r.cdf_s.assign(
+            epoch=lambda df: (
+                df["contrast"]
+                .str.extract(r"^epoch(\d+)")
+                .astype(int)
+            )
+        )
+    ])
+    .assign(
+        sector=lambda df: pd.Categorical(
+            df["sector"],
+            categories=["overall", *SECTORS],
+        )
+    )
+    .merge(bounds)
+    .set_index(["epoch", "period", "sector"])
+    .sort_index()
+    .pipe(
+        lambda df: DataFrame({
+            "ratio": df["ratio"],
+            f"[{r.alpha/2:.1%}": df["conf.low"],
+            f"{r.conf+r.alpha/2:.1%}]": df["conf.high"],
+            "z": df["statistic"],
+            "p": df["adj.p.value"],
+        }, df.index)
+    )
+)
+table = (
+    pd.concat({
+        "Estimated marginal means": emm,
+        "Epoch vs epochs 0-4": effect,
+        "Epoch vs previous epoch": seq,
+    }, axis=1)
+    .reset_index()
+    .assign(
+        epoch=lambda df: df["epoch"].astype(str)+". "+df.pop("period")
+    )
+    .set_index(["epoch", "sector"])
+)
+num_cols = [c != "p" for c in table.columns.get_level_values(1)]
+pv_cols = [c == "p" for c in table.columns.get_level_values(1)]
+
+(
+    table
+    .style
+    .format(
+        "{:.2f}", subset=pd.IndexSlice[:, num_cols],
+        na_rep="-", escape="latex",
+    )
+    .format(
+        "{:.3f}", subset=pd.IndexSlice[:, pv_cols],
+        na_rep="-", escape="latex",
+    )
+    .pipe(lambda df: print(
+        df.to_latex(
+            hrules=True,
+            multicol_align="c",
+            multirow_align="t",
+            position="htb!",
+        )
+    ))
+)
+```
+
+### Causal effects
+
+```{python}
+did = (
+    r.cdf_si
+    .assign(
+        epoch=lambda df: (
+            df["epoch_consec"]
+            .str.extract(r"^(\d+)")
+            .astype(int)
+        ),
+    )
+    .merge(bounds)
+    .rename(columns={
+        "epoch": "Epoch",
+        "sector_consec": "Comparison"
+    })
+    .set_index(["Epoch"])
+    .sort_index()
+    .pipe(
+        lambda df: (
+            DataFrame({
+                "Ratio of ratios": df["ratio"],
+                f"[{r.alpha/2:.1%}": df["conf.low"],
+                f"{r.conf+r.alpha/2:.1%}]": df["conf.high"],
+                "z": df["statistic"],
+                "p": df["adj.p.value"],
+            }, index=df.index)
+        )
+    )
+)
+eff = (
+    r.cdf_ei
+    .assign(
+        epoch_custom=lambda df: (
+            df["epoch_custom"]
+            .str.replace(r"epochs?|[\[\]]", r"", regex=True)
+        ),
+        epoch=lambda df: (
+            df["epoch_custom"]
+            .str.extract(r"^(\d+)")
+            .astype(int)
+        ),
+    )
+    .merge(bounds)
+    .rename(columns={
+        "epoch": "Epoch",
+        "sector_consec": "Comparison"
+    })
+    .set_index(["Epoch"])
+    .sort_index()
+    .pipe(
+        lambda df: (
+            DataFrame({
+                "Ratio of ratios": df["ratio"],
+                f"[{r.alpha/2:.1%}": df["conf.low"],
+                f"{r.conf+r.alpha/2:.1%}]": df["conf.high"],
+                "z": df["statistic"],
+                "p": df["adj.p.value"],
+                "period": df["period"],
+            }, index=df.index)
+        )
+    )
+)
+table = (
+    pd.concat({
+        "Difference-in-difference": did,
+        "Cumulative causal effect": eff,
+    }, axis=1)
+    .reset_index()
+    .sort_values("Epoch")
+    .assign(
+        Epoch=lambda df: (
+            df["Epoch"].astype(str)
+            +
+            ". " + df.pop(("Cumulative causal effect", "period"))
+        )
+    )
+    .set_index(["Epoch"])
+)
+num_cols = [c != "p" for c in table.columns.get_level_values(1)]
+pv_cols = [c == "p" for c in table.columns.get_level_values(1)]
+
+(
+    table
+    .style
+    .format(
+        "{:.2f}", subset=pd.IndexSlice[:, num_cols],
+        na_rep="-", escape="latex",
+    )
+    .format(
+        "{:.3f}", subset=pd.IndexSlice[:, pv_cols],
+        na_rep="-", escape="latex",
+    )
+    .pipe(lambda df: print(
+        df.to_latex(
+            hrules=True,
+            multicol_align="c",
+            multirow_align="t",
+            position="htb!",
+        )
+    ))
+)
+```
+
+## Supplement: quality effects
+
+```{r}
+emm  <- emmeans(rg, ~epoch*quality)
+cvec <- rep(0L, length(emm@levels$epoch))
+cvec[c(5, 10)] <- c(-1L, 1L)
+
+C1 <- rlang::ll(
+    "Non-news"       = c(cvec, 0L*cvec, 0L*cvec, 0L*cvec),
+    "News"           = c(0L*cvec, cvec, cvec, cvec) / 3,
+    "Low quality"    = c(0L*cvec, cvec, 0L*cvec, 0L*cvec),
+    "Medium quality" = c(0L*cvec, 0L*cvec, cvec, 0L*cvec),
+    "High quality"   = c(0L*cvec, 0L*cvec, 0L*cvec, cvec),
+)
+C2 <- rlang::ll(
+    "Low quality"    = -c(0L*cvec, 2/3*cvec, -cvec/3, -cvec/3),
+    "Medium quality" = -c(0L*cvec, -cvec/3, 2/3*cvec, -cvec/3),
+    "High quality"   = -c(0L*cvec, -cvec/3, -cvec/3, 2/3*cvec),
+)
+C3 <- rlang::ll(
+    "News"           = c(-cvec, cvec/3, cvec/3, cvec/3),
+    "Low quality"    = c(-cvec, cvec, 0L*cvec, 0L*cvec),
+    "Medium quality" = c(-cvec, 0L*cvec, cvec, 0L*cvec),
+    "High quality"   = c(-cvec, 0L*cvec, 0L*cvec, cvec),
+)
+con1 <- contrast(emm, method = C1)
+con2 <- contrast(emm, method = C2)
+con3 <- contrast(emm, method = C3)
+
+cdf1 <- .tidy(con1)
+cdf2 <- .tidy(con2)
+cdf3 <- .tidy(con3)
+```
+
+```{python}
+lo = f"[{r.alpha/2:.1%}"
+hi = f"{(1 - r.alpha/2):.1%}]"
+cols = ["contrast", "ratio", "conf.low", "conf.high", "adj.p.value"]
+rename = {
+    "conf.low": lo,
+    "conf.high": hi,
+    "adj.p.value": "p",
+}
+table = pd.concat(
+    {
+        "Decrease": (
+            r.cdf1[cols]
+            .rename(columns=rename)
+            .set_index("contrast", drop=True)
+        ),
+        "Relative": (
+            r.cdf2[cols]
+            .rename(columns=rename)
+            .set_index("contrast", drop=True)
+        ),
+        "Causal": (
+            r.cdf3[cols]
+            .rename(columns=rename)
+            .set_index("contrast", drop=True)
+        ),
+    },
+    axis=1,
+)
+# Print nicely to Latex using pandas styler
+(
+    table
+    .style
+    .format("{:.2f}", na_rep="-", escape="latex")
+    .format(
+        "{:.3f}", subset=[
+            ("Decrease", "p"),
+            ("Relative", "p"),
+            ("Causal", "p"),
+        ],
+        na_rep="-", escape="latex"\
+    )
+    .pipe(lambda df: print(
+        df.to_latex(
+            hrules=True,
+            multicol_align="c",
+            multirow_align="t",
+            position="htb!",
+        )
+    ))
+)
+```

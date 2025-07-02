@@ -1,0 +1,159 @@
+stages:
+
+  news:
+    cmd: python scripts/make_news.py
+    deps:
+    - scripts/make_news.py
+    - data/raw/news-us.parquet
+    - data/raw/metadata.parquet
+    - data/raw/imputed-reactions.parquet
+    params:
+    - data
+    outs:
+    - data/proc/news.parquet:
+        persist: true
+    - data/proc/counts.parquet:
+        persist: true
+
+  # labels:
+  #   foreach:
+  #   - political
+  #   - negativity
+  #   do:
+  #     cmd: python scripts/make_${item}.py
+  #     deps:
+  #     - scripts/make_${item}.py
+  #     - data/proc/text.parquet
+  #     params:
+  #     - ml.inference
+  #     - ml.labels.${item}
+  #     outs:
+  #     - data/proc/cls-${item}.parquet:
+  #         persist: true
+
+  glmm:
+    foreach:
+    - reactions
+    # - comments
+    do:
+      cmd: Rscript scripts/glmm_${item}.R
+      deps:
+      - scripts/glmm_${item}.R
+      - data/proc/news.parquet
+      outs:
+      - models/glmm/${item}:
+          persist: true
+
+  dataset:
+    cmd: Rscript scripts/make_dataset.R
+    deps:
+    - scripts/make_dataset.R
+    - data/proc/news.parquet
+    - models/glmm/reactions
+    outs:
+    - data/proc/dataset.parquet:
+        persist: true
+
+  non-news:
+    cmd: python scripts/make_nonnews.py
+    deps:
+    - scripts/make_nonnews.py
+    - data/raw/non-news-us.parquet
+    params:
+    - data.author
+    - data.usecols
+    outs:
+    - data/proc/non-news.parquet:
+        persist: true
+
+  comscore:
+    cmd: python scripts/make_comscore.py
+    deps:
+    - scripts/make_comscore.py
+    - data/raw/comscore.parquet
+    params:
+    - comscore
+    outs:
+    - data/proc/comscore.parquet:
+        persist: true
+
+  weekly:
+    cmd: python scripts/make_weekly.py
+    deps:
+    - scripts/make_weekly.py
+    - data/proc/dataset.parquet
+    - data/proc/non-news.parquet
+    outs:
+    - data/proc/weekly.parquet:
+        persist: true
+    - data/proc/weekly-non-news.parquet:
+        persist: true
+
+  signal:
+    cmd: python scripts/make_signal.py
+    deps:
+    - scripts/make_signal.py
+    - data/proc/weekly.parquet
+    outs:
+    - data/proc/signal.parquet:
+        persist: true
+
+  changepoints-detect:
+    cmd: Rscript scripts/changepoints_detect.R
+    deps:
+    - scripts/changepoints_detect.R
+    - data/proc/signal.parquet
+    params:
+    - changepoints.subsets
+    - changepoints.beast
+    outs:
+    - data/proc/beast.parquet:
+        persist: true
+
+  changepoints-postprocess:
+    cmd: python scripts/changepoints_postprocess.py
+    deps:
+    - scripts/changepoints_postprocess.py
+    - data/proc/beast.parquet
+    params:
+    - changepoints.timescale
+    - changepoints.peaks
+    - changepoints.subsets
+    - changepoints.use
+    - epochs
+    outs:
+    - data/proc/changepoints.parquet:
+        persist: true
+    - data/proc/epochs.parquet:
+        persist: true
+
+  timeseries:
+    cmd: python scripts/make_timeseries.py
+    deps:
+    - scripts/make_timeseries.py
+    - data/proc/weekly.parquet
+    - data/proc/weekly-non-news.parquet
+    outs:
+    - data/proc/timeseries.parquet:
+        persist: true
+
+  glmm-news:
+    cmd: Rscript scripts/glmm_news.R
+    deps:
+    - scripts/glmm_news.R
+    - data/proc/epochs.parquet
+    - data/proc/dataset.parquet
+    outs:
+    - models/glmm/news:
+        persist: true
+
+  glmm-both:
+    cmd: Rscript scripts/glmm_both.R
+    deps:
+    - scripts/glmm_both.R
+    - data/proc/dataset.parquet
+    - data/proc/epochs.parquet
+    - data/proc/non-news.parquet
+    outs:
+    - models/glmm/both:
+        persist: true

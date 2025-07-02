@@ -1,0 +1,1074 @@
+---
+title: "Generalized linear mixed model"
+subtitle: "for news posts with changepoints"
+author: "Szymon Talaga"
+date: last-modified
+date-format: "MMMM D, YYYY | HH:mm:ss (Z)"
+toc: true
+toc-depth: 3
+toc-location: left
+execute:
+  echo: false
+  warning: false
+  cache: false
+  daemon: false
+format:
+  html:
+    grid:
+      margin-width: 350px
+    embed-resources: true
+  pdf:
+    toc: false
+    number-sections: true
+    colorlinks: true
+reference-location: margin
+citation-location: margin
+---
+
+```{r}
+library(arrow)
+library(stringr)
+library(dplyr)
+library(purrr)
+library(tibble)
+library(emmeans)
+library(broom)
+library(reticulate)
+library(lubridate)
+library(glmmTMB)
+
+use_condaenv("newsuse-study-algorithms")
+
+project <- import("project")
+config  <- project$config
+paths   <- project$paths[["__copy__"]]()
+
+alpha     <- config$inference$alpha
+conf      <- config$inference$conf
+adjust    <- config$inference$adjust
+
+emm_options(
+    emmeans  = list(type = "response", level = conf, adjust = adjust),
+    contrast = list(adjust = adjust),
+    summary  = list(infer = TRUE),
+    mvt.args = list(abseps = 1e-4)
+)
+```
+
+```{python}
+import importlib
+from typing import Mapping
+import datetime
+import numpy as np
+import pandas as pd
+from scipy import stats
+import matplotlib as mpl
+import matplotlib.dates
+import matplotlib.transforms
+import matplotlib.pyplot as plt
+from matplotlib.patheffects import withStroke
+import seaborn as sns
+import seaborn.objects as so
+from newsuse.data import DataFrame
+from project import config, paths
+
+mpl.style.use(config.plotting.style)
+mpl.rcParams.update({
+    k: v.make() if isinstance(v, Mapping) and "make!" in v else v
+    for k, v in config.plotting.params.items()
+})
+
+# Get default color cycle here and extract colors
+figpath = paths.figures / "glmm" / "news"
+figpath.mkdir(parents=True, exist_ok=True)
+
+QUALITY   = ["low", "medium", "high"]
+COLORS    = mpl.rcParams["axes.prop_cycle"].by_key()["color"]
+CMAP      = dict(zip(QUALITY, COLORS, strict=False))
+ELECTIONS = {k: pd.Timestamp(v) for k, v in config.elections.items()}
+```
+
+```{r}
+dataset <- as.character(paths$dataset) %>%
+    read_parquet %>%
+    left_join(read_parquet(as.character(paths$epochs)))
+```
+
+```{r}
+epochs <- as.character(paths$epochmeta) %>%
+    read_parquet %>%
+    mutate(epoch = 0L:(n() - 1L), .before = 1L)
+
+changepoints <- as.character(paths$changepoints) %>%
+    read_parquet %>%
+    filter(subset == config$changepoints$use)
+```
+
+## Main analysis
+
+### Estimated marginal means
+
+```{r}
+glmm <- readRDS(
+    as.character(paths$glmm / "news" / "main.rds")
+)
+```
+
+```{r}
+obs <- dataset %>%
+    group_by(name, quality, epoch) %>%
+    summarize(n = n(), reactions = mean(reactions)) %>%
+    ungroup %>%
+    left_join(epochs)
+```
+
+```{r}
+extract_outlet_re <- function(re, term) {
+    parts <- str_split(term, ":", simplify = FALSE)[[1L]]
+    estim <- re[[term]]
+    rdf   <- tibble(term = rownames(estim), estimate = estim[, 1L])
+    for (i in seq_along(parts)) {
+        rdf[[parts[i]]] <- str_split_i(rdf[["term"]], ":", i)
+    }
+    select(rdf, !!!parts, estimate)
+}
+```
+
+```{r}
+re  <- ranef(glmm)
+qdf <- dataset %>%
+    select(name, quality) %>%
+    distinct
+```
+
+```{r}
+re_cond_o <- extract_outlet_re(re$cond, "country:name")
+re_cond_e <- extract_outlet_re(re$cond, "country:name:epoch")
+re_cond <- left_join(
+    rename(re_cond_o, mu_outlet = estimate),
+    rename(re_cond_e, mu_epoch = estimate),
+    by = c("country", "name")
+) %>%
+    mutate(
+        epoch = as.integer(epoch),
+        mu = mu_outlet + mu_epoch,
+    ) %>%
+    left_join(qdf)
+
+rdf <- re_cond %>%
+    mutate(quality = factor(quality, levels = py$QUALITY)) %>%
+    group_by(quality, epoch) %>%
+    summarize(mu = exp(var(mu)/2)) %>%
+    ungroup %>%
+    arrange(epoch, quality)
+```
+
+```{r}
+rg <- ref_grid(glmm, data = glmm$frame)
+
+# Update regression coefficients in the reference grid
+# so they satisfy:
+# X(b + o) = mu + sigma^2_b / 2
+# This way the estimated marginal means will account for
+# the heterogeneity of the outlet effects.
+# This works because when the link function is log,
+# and random effects are Gaussian, then the distribution
+# of the response accounting for the random effects is log-normal.
+offset <- rg@grid %>%
+    mutate(epoch = as.integer(as.character(epoch))) %>%
+    left_join(rdf) %>%
+    mutate(mu = log(mu)) %>%
+    pull(mu)
+rg@bhat <- rg@bhat + solve(rg@linfct, offset)
+```
+
+```{r}
+set.seed(10105)
+
+emm    <- emmeans(rg, ~1)
+emm_e  <- emmeans(rg, ~epoch)
+emm_q  <- emmeans(rg, ~quality)
+emm_eq <- emmeans(rg, ~epoch | quality)
+emm_qe <- emmeans(rg, ~quality | epoch)
+
+con_e   <- contrast(emm_e, method = "eff")
+con_es  <- contrast(emm_e, method = "consec")
+con_q   <- contrast(emm_q, method = "eff")
+con_eq  <- contrast(emm_eq, method = "eff")
+con_eqs <- contrast(emm_eq, method = "consec")
+con_qe  <- contrast(emm_qe, method = "eff")
+
+.tidy <- function(df, conf.int = TRUE, ...) {
+    tidy(df, conf.int = conf.int, ...)
+}
+
+edf     <- .tidy(emm)
+edf_e   <- .tidy(emm_e)
+edf_q   <- .tidy(emm_q)
+edf_eq  <- .tidy(emm_eq)
+edf_qe  <- .tidy(emm_qe)
+cdf_e   <- .tidy(con_e)
+cdf_es  <- .tidy(con_es)
+cdf_eq  <- .tidy(con_eq)
+cdf_eqs <- .tidy(con_eqs)
+cdf_eq  <- .tidy(con_eq)
+cdf_qe  <- .tidy(con_qe)
+```
+
+```{python}
+fig, ax = plt.subplots(figsize=(7.5, 3))
+
+# Outlet-epoch averages ============================
+(
+    so.Plot(r.obs, x="mid", y="reactions", color="quality")
+    .add(
+        so.Dots(), so.Jitter(x=14, seed=17), so.Dodge(),
+        pointsize="n", legend=False
+    )
+    .scale(
+        pointsize=so.Continuous(trans="sqrt"),
+        color=so.Nominal(order=QUALITY)
+    )
+    .theme(mpl.rcParams)
+    .on(ax)
+    .show()
+)
+
+epochs = r.epochs
+data = epochs
+idx = data["start"].idxmin()
+data.loc[idx, "start"] -= pd.Timedelta(days=180)
+data.loc[idx, "mid"] -= pd.Timedelta(days=90)
+idx = data["end"].idxmax()
+data.loc[idx, "end"] += pd.Timedelta(days=180)
+data.loc[idx, "mid"] += pd.Timedelta(days=90)
+
+ax.set_xlim(data["start"].min(), data["end"].max())
+
+xticks = epochs["start"]
+ax_top = ax.secondary_xaxis("top")
+ax_top.set_xticks(xticks)
+ax_top.set_xticklabels(
+    xticks.dt.strftime("%m.%d"),
+    fontsize=6,
+)
+ax_top.set_xlabel(None)
+
+data = (
+    r.edf_e
+    .assign(epoch=lambda df: df["epoch"].astype(int))
+    .merge(epochs, on="epoch")
+)
+(
+    so.Plot(data, x="mid", y="response")
+    .add(
+        so.Band(color="black", alpha=.12),
+        ymin="conf.low", ymax="conf.high", legend=False,
+    )
+    .add(so.Line(linestyle=":", color="black"), legend=False)
+    .on(ax)
+    .show()
+)
+data = (
+    r.edf_eq
+    .assign(epoch=lambda df: df["epoch"].astype(int))
+    .merge(epochs, on="epoch")
+)
+(
+    so.Plot(data, x="mid", y="response", color="quality")
+    .add(
+        so.Range(linewidth=2, color="black"), so.Dodge(),
+        ymin="conf.low", ymax="conf.high", legend=False,
+    )
+    .add(
+        so.Dot(
+            marker="s",
+            edgecolor="black",
+            edgewidth=1.5,
+            artist_kws={"zorder": 10}
+        ),
+        so.Dodge(), legend=False
+    )
+    .scale(color=so.Nominal(order=QUALITY))
+    .theme(mpl.rcParams)
+    .on(ax)
+    .show()
+)
+
+ax.set_yscale("log")
+ax.set_xlabel(None)
+ax.set_ylabel("Reactions per post")
+
+y0, y1 = ax.get_ylim()
+ax.set_ylim(y0, y1 * 1.5)
+
+# Effect coding epoch significance ============================
+
+for ts in r.changepoints["timestamp"]:
+    ax.axvline(ts, ls=":", color="k", lw=.5)
+
+data = data.assign(ratio=r.cdf_e["ratio"], pv=r.cdf_e["adj.p.value"])
+texts = []
+for idx, row in (
+    data.query(f"pv <= {r.alpha}")
+    .reset_index(drop=True)
+    .iterrows()
+):
+    fields = ["ratio", "pv", "mid", "start", "end"]
+    ratio, pv, mid, start, end = row[fields]
+    pvs = rf"\approx {pv:.3f}" if pv >= 0.001 else "< 0.001"
+    # ax.axvspan(begin, end, color="gray", alpha=.2, zorder=-10)
+    text = ax.annotate(
+        rf"$p {pvs}$", (mid, 10**4.51),
+        fontsize=5, ha="center",
+        path_effects=[withStroke(foreground="white", linewidth=2)],
+
+    )
+    target, source = 4.5, 4.0
+    increase = ratio > 1
+    if increase:
+        target, source = source, target
+    ax.annotate(
+        "",
+        xy=(mid, 10**source),
+        xytext=(mid, 10**target),
+        xycoords="data",
+        arrowprops={
+            "arrowstyle": "->",
+            "connectionstyle": "arc3",
+            "color": "black" if increase else "red",
+        },
+    )
+    texts.append(text)
+    if idx == 0:
+        ax.annotate(
+            r"epoch vs mean",
+            (mid, 10**4.7),
+            fontsize=5.5,
+            fontweight="bold",
+            ha="center",
+            bbox={"facecolor": "white", "pad": 2},
+        )
+
+# Sequential epoch significance ==================================
+
+sdata = (
+    r.cdf_es
+    .assign(
+        epoch1=lambda df:
+            df["contrast"].str.extract(r"epoch(\d+)$").astype(int),
+        epoch2=lambda df:
+            df["contrast"].str.extract(r"^epoch(\d+)").astype(int),
+    )
+    .merge(
+        epochs[["epoch", "mid"]].rename(columns={"mid": "mid1"}),
+        left_on="epoch1", right_on="epoch"
+    )
+    .merge(
+        epochs[["epoch", "mid"]].rename(columns={"mid": "mid2"}),
+        left_on="epoch2", right_on="epoch",
+    )
+    .rename(columns={"adj.p.value": "pv"})
+    .query(f"pv <= {r.alpha}")
+    .reset_index(drop=True)
+)
+
+counter = 0
+seqy = 10
+for idx, row in sdata.iterrows():
+    ratio, pv, mid1, mid2 = row[["ratio", "pv", "mid1", "mid2"]]
+    epoch1, epoch2 = row[["epoch1", "epoch2"]]
+    sig = (
+        r"$p \lessapprox 0.001$" if pv <= 0.00155
+        else rf"$p \approx {pv:.3f}$"
+    )
+    ax.annotate(
+        "",
+        xy=(mid2, seqy),
+        xytext=(mid1, seqy),
+        xycoords="data",
+        textcoords="data",
+        arrowprops={
+            "arrowstyle": "->",
+            "connectionstyle": "arc3",
+            "color": "black" if ratio > 1 else "red",
+        }
+    )
+    mid = mid1 + (mid2 - mid1) / 2
+    ax.annotate(
+        sig,
+        xy=(mid, seqy+5),
+        ha="center",
+        fontsize=5,
+        path_effects=[withStroke(foreground="white", linewidth=2)]
+    )
+    if idx == 0:
+        ax.annotate(
+            "Significant change",
+            xy=(mid, 5.5),
+            ha="center",
+            fontsize=5.5,
+            fontweight="bold",
+            bbox={"facecolor": "white", "pad": 2}
+        )
+    if int(epoch2) - int(epoch1) > 1:
+        lo, hi = row[["conf.low", "conf.high"]]
+        ax.annotate(
+            rf"$MR \approx {ratio:.2f}$"
+            "\n"
+            rf"${r.conf*100:.0f}\%: [{lo:.2f}, {hi:.2f}]$",
+            xy=(mid - pd.Timedelta(days=180), seqy-4),
+            ha="left",
+            va="center",
+            fontsize=5,
+            bbox={"facecolor": "white", "pad": 2, "lw": .01},
+        )
+
+# Legend ==========================================================
+quality_handles = [
+    mpl.lines.Line2D(
+        [], [], label="Quality   ", lw=0,
+    ),
+] + [
+    mpl.lines.Line2D(
+        [], [], label=label.title(), color=color, lw=0,
+        marker="s", markersize=7,
+    ) for color, label in zip(COLORS, QUALITY, strict=False)
+]
+
+quality_legend = fig.legend(
+    handles=quality_handles,
+    ncols=len(quality_handles),
+    frameon=False,
+    loc="center left",
+    fontsize=7,
+    bbox_to_anchor=(.065,  -0.01),
+    handlelength=-0.2,
+)
+
+fig.add_artist(quality_legend)
+
+other_handles = [
+    mpl.lines.Line2D(
+        [], [], label="Estimate", lw=0,
+    ),
+    mpl.lines.Line2D(
+        [], [], label="Population", lw=0, ls="-",
+        marker="s", markeredgecolor="black", color="gray",
+        markersize=7,
+    ),
+    mpl.lines.Line2D(
+        [], [], label="Outlet", lw=0, ls="-",
+        marker="o", markeredgecolor="black", color="gray", alpha=.25,
+        markersize=7,
+    ),
+     mpl.lines.Line2D(
+        [], [], label="Overall", ls=":", lw=2,
+        color="black", marker="None",
+    ),
+    mpl.patches.Patch(
+        color="black", alpha=.2,
+        label=rf"{r.conf*100:.0f}% CI",
+    ),
+]
+
+other_legend = fig.legend(
+    handles=other_handles,
+    ncols=len(other_handles),
+    frameon=False,
+    loc="center left",
+    fontsize=7,
+    bbox_to_anchor=(0.475, -0.01),
+    handlelength=1,
+)
+
+# Final touches ==========================================
+
+ax.tick_params(labelsize=8)
+
+# Add elections
+# for ts in ELECTIONS.values():
+#     ax.axvline(ts, color="gold", lw=2.5, zorder=0)
+#     ax.axvline(ts, color="black", lw=.25, zorder=1)
+
+# Save figure ==================================================
+
+fig.tight_layout()
+fig.savefig(figpath / "news-emmeans.pdf")
+```
+
+### Changepoints (constrast)
+
+```{python}
+fig, ax = plt.subplots(figsize=(7.5, 2))
+
+econ_color = COLORS[-1]
+
+ax.set_xlim(epochs["start"].min(), epochs["end"].max())
+
+ax.axhline(1, ls="--", color="k", lw=.5, zorder=-10)
+
+cdf_e = (
+    r.cdf_e
+    .assign(
+        epoch=epochs["epoch"],
+        mid=epochs["mid"],
+    )
+)
+(
+    so.Plot(cdf_e, x="mid", y="ratio")
+    .add(so.Line(linestyle="--", linewidth=1, color=econ_color))
+    .add(
+        so.Range(linewidth=2.5, color="black"),
+        ymin="conf.low", ymax="conf.high", legend=False,
+    )
+    .add(
+        so.Dot(
+            color=econ_color,
+            marker="o",
+            pointsize=7,
+            edgecolor="black",
+            artist_kws={"zorder": 10}
+        ),
+        so.Dodge(), legend=False
+    )
+    .theme(mpl.rcParams)
+    .on(ax)
+    .show()
+)
+
+cdf_es = (
+    r.cdf_es[:]
+    .assign(
+        x=epochs[1:]["start"].to_numpy(),
+        increase=lambda df: np.where(
+            df["ratio"] > 1, "increase", "deacrease"
+        ),
+    )
+    .assign(increase=lambda df: np.where(
+        df["adj.p.value"] <= r.alpha, df["increase"], "ns"
+    ))
+)
+increase_order = ["increase", "deacrease", "ns"]
+(
+    so.Plot(cdf_es, x="x", y="ratio")
+    .add(
+        so.Range(linewidth=2.5, color="black"),
+        ymin="conf.low", ymax="conf.high", legend=False,
+    )
+    .add(
+        so.Dot(artist_kws={"zorder": 10}),
+        edgecolor="increase",
+        pointsize="increase",
+        color="increase",
+        marker="increase",
+        legend=False
+    )
+    .scale(
+        color=so.Nominal(
+            order=increase_order,
+            values=["black", "red", "white"],
+        ),
+        edgecolor=so.Nominal(
+            order=increase_order,
+            values=["white", "white", "black"],
+        ),
+        marker=so.Nominal(
+            order=increase_order,
+            values=["^", "v", "o"],
+        ),
+        pointsize=so.Nominal(
+            order=increase_order,
+            values=[10, 10, 7],
+        ),
+    )
+    .theme(mpl.rcParams)
+    .on(ax)
+    .show()
+)
+
+ax.set_xlabel(None)
+ax.set_ylabel("Ratio of means")
+ax.set_yscale("log", base=2)
+
+xticks = epochs["start"]
+ax_top = ax.secondary_xaxis("top")
+ax_top.set_xticks(xticks)
+ax_top.set_xticklabels(
+    xticks.dt.strftime("%m.%d"),
+    fontsize=6,
+)
+ax.tick_params(labelsize=8)
+
+for x in xticks:
+    ax.axvline(x, ls=":", color="k", lw=.5)
+
+# Legend ==================================================
+
+handles_epoch = [
+    mpl.lines.Line2D(
+        [], [], label="Epoch/mean", lw=3, ls="-",
+        marker="o", markeredgecolor="black", color=econ_color,
+        markersize=8,
+    ),
+    mpl.lines.Line2D(
+        [], [], label=f"{r.conf*100:.0f}% CI", lw=0,
+        marker="|", markersize=12, markeredgewidth=3,
+        color="black",
+    )
+]
+
+legend_epoch = fig.legend(
+    handles=handles_epoch,
+    ncols=len(handles_epoch),
+    frameon=False,
+    loc="center",
+    fontsize=8,
+    bbox_to_anchor=(.25, -.03),
+)
+fig.add_artist(legend_epoch)
+
+handles_seq = [
+    mpl.lines.Line2D(
+        [], [], label="Sequential", ls="None",
+        marker="",
+        markeredgewidth=0,
+        markersize=0,
+    ),
+    mpl.lines.Line2D(
+        [], [], label="Increase", lw=0,
+        marker="^", color="black",
+        markeredgecolor="white",
+        markersize=12,
+    ),
+    mpl.lines.Line2D(
+        [], [], label="Decrease", lw=0,
+        marker="v", color="red",
+        markeredgecolor="white",
+        markersize=12,
+    ),
+    mpl.lines.Line2D(
+        [], [], label="Not significant", lw=0,
+        marker="o", color="white",
+        markeredgecolor="black",
+        markersize=8,
+    ),
+]
+
+legend_seq = fig.legend(
+    handles=handles_seq,
+    ncols=len(handles_seq),
+    frameon=False,
+    loc="center",
+    fontsize=8,
+    bbox_to_anchor=(.72, -.03),
+)
+
+# Add elections
+# for ts in ELECTIONS.values():
+#     ax.axvline(ts, color="gold", lw=2.5, zorder=0)
+#     ax.axvline(ts, color="black", lw=.25, zorder=1)
+
+fig.tight_layout()
+fig.savefig(figpath / "news-contrast.pdf")
+```
+
+```{r}
+omni <- joint_tests(con_qe, by = "epoch")
+odf  <- .tidy(omni) %>%
+    mutate(epoch = as.integer(epoch)) %>%
+    left_join(epochs)
+```
+
+```{python}
+data = (
+    r.cdf_qe
+    .assign(quality=lambda df:
+        df["contrast"].str.extract(r"^(?P<quality>\w+)\s")
+    )
+    .assign(epoch=lambda df: df["epoch"].astype(int))
+    .convert_dtypes()
+    .merge(epochs, on="epoch")
+    .assign(
+        qcolor=lambda df: np.where(
+            df["adj.p.value"] <= r.alpha,
+            df["quality"], "ns",
+        )
+    )
+)
+
+markers = ["s", "o", "D"]
+
+fig, ax = plt.subplots(figsize=(7.5, 2))
+(
+    so.Plot(data, x="mid", y="ratio", color="quality")
+    .add(
+        so.Line(linestyle="--", linewidth=1),
+        so.Dodge(),
+        legend=False,
+    )
+    .add(
+        so.Range(linewidth=2.5, alpha=.75, color="black"), so.Dodge(),
+        ymin="conf.low", ymax="conf.high", legend=False,
+    )
+    .add(
+        so.Dot(
+            pointsize=7,
+            edgecolor="black",
+            artist_kws={"zorder": 10},
+            marker="s",
+        ),
+        so.Dodge(),
+        legend=False,
+    )
+    .scale(
+        color=so.Nominal(
+            order=QUALITY,
+            values=COLORS[:len(QUALITY)],
+        ),
+        # marker=so.Nominal(
+        #     order=QUALITY,
+        #     values=markers,
+        # ),
+    )
+    .on(ax)
+    .plot()
+)
+
+ax.axhline(1, ls="--", color="k", lw=.5, zorder=-10)
+ax.set_yscale("log", base=2)
+
+ax.set_xlim(epochs["start"].min(), epochs["end"].max())
+ax.set_ylim(top=2**3)
+
+ax.set_xlabel(None)
+ax.set_ylabel("Ratio of means")
+
+ax.tick_params(labelsize=8)
+
+xticks = epochs["start"]
+ax_top = ax.secondary_xaxis("top")
+ax_top.set_xticks(xticks)
+ax_top.set_xticklabels(
+    xticks.dt.strftime("%m.%d"),
+    fontsize=6,
+)
+
+for ts in xticks:
+    ax.axvline(ts, ls=":", color="k", lw=.5)
+
+# for election, ts in ELECTIONS.items():
+#     ax.axvline(ts, color="gold", lw=2.5, zorder=0)
+#     ax.axvline(ts, color="black", lw=.25, zorder=1)
+
+for _, row in r.odf.iterrows():
+    mid, pv = row[["mid", "p.value"]]
+    if row["epoch"] == 0:
+        mid = row["start"]
+    elif row["epoch"] == 11:
+        mid = row["end"] + pd.Timedelta(days=60)
+    pvs = rf"\approx {pv:.3f}" if pv >= 0.00155 else "< 0.001"
+    ax.annotate(
+        rf"$p {pvs}$", (mid, 2**2.7),
+        fontsize=5, ha="center", va="center",
+        path_effects=[withStroke(foreground="white", linewidth=2)],
+    )
+    if pv > r.alpha:
+        start, end = row[["start", "end"]]
+        if row["epoch"] == 0:
+            start -= pd.Timedelta(days=180)
+        ax.axvspan(
+            start, end, color="gray", alpha=.2, zorder=-10,
+        )
+
+handles = [
+    mpl.lines.Line2D(
+        [], [], label=f"{quality} / Mean".title(), lw=0,
+        marker="s", markersize=7,
+        color=color, markeredgecolor="black",
+    ) for quality, color in zip(
+        QUALITY, COLORS, strict=False,
+    )
+] + [
+    mpl.lines.Line2D(
+        [], [], label=f"{r.conf*100:.0f}% CI", lw=0,
+        marker="|", markersize=12, markeredgewidth=2,
+        color="black",
+    ),
+    # Gray patch for non-significant contrasts
+    mpl.patches.Patch(
+        color="gray", alpha=.5,
+        label=r"Non-significant $F$ test",
+        # set large patch size
+        linewidth=10
+    ),
+]
+
+legend = fig.legend(
+    handles=handles,
+    ncols=len(handles),
+    frameon=False,
+    loc="center",
+    fontsize=8,
+    bbox_to_anchor=(.5, -.02),
+)
+
+fig.tight_layout()
+fig.savefig(figpath / "news-quality-contrast.pdf")
+```
+
+## Tables
+
+```{python}
+bounds = (
+    r.epochs
+    .assign(
+        start=lambda df: df["start"].dt.strftime("%y.%m.%d"),
+        end=lambda df: df["end"].dt.strftime("%y.%m.%d"),
+        period=lambda df: (
+            df["start"] + "-" + df["end"]
+        ),
+    )
+    [["epoch", "period"]]
+)
+emm = (
+    pd.concat([r.edf_eq, r.edf_e], axis=0, ignore_index=True)
+    .fillna({"quality": "overall"})
+    .assign(
+        epoch=lambda df: df["epoch"].astype(int),
+        quality=lambda df: pd.Categorical(
+            df["quality"],
+            categories=["overall", *QUALITY],
+        )
+    )
+    .merge(bounds)
+    .set_index(["epoch", "period", "quality"])
+    .sort_index()
+    .pipe(
+        lambda df: (
+            DataFrame({
+                "mean": df["response"],
+                f"{r.conf:.0%} CI": df["conf.low"],
+                "": df["conf.high"],
+            }, index=df.index)
+        )
+    )
+)
+effect = (
+    pd.concat([
+        r.cdf_e.assign(
+            epoch=lambda df: (
+                df["contrast"]
+                .str.extract(r"epoch(\d+)")
+                .astype(int)
+            ),
+            quality="overall",
+        ),
+        r.cdf_eq.assign(
+            epoch=lambda df: (
+                df["contrast"]
+                .str.extract(r"epoch(\d+)")
+                .astype(int)
+            ),
+        )
+    ])
+    .assign(quality=lambda df: pd.Categorical(
+        df["quality"],
+        categories=["overall", *QUALITY],
+    ))
+    .merge(bounds)
+    .set_index(["epoch", "period", "quality"])
+    .sort_index()
+    .pipe(
+        lambda df: DataFrame({
+            "ratio": df["ratio"],
+            f"{r.conf:.0%} CI": df["conf.low"],
+            "": df["conf.high"],
+            "z": df["statistic"],
+            "p": df["adj.p.value"],
+        }, df.index)
+    )
+)
+seq = (
+    pd.concat([
+        r.cdf_es
+        .assign(
+            epoch=lambda df: (
+                df["contrast"]
+                .str.extract(r"^epoch(\d+)")
+                .astype(int)
+            ),
+            quality="overall",
+        ),
+        r.cdf_eqs.assign(
+            epoch=lambda df: (
+                df["contrast"]
+                .str.extract(r"^epoch(\d+)")
+                .astype(int)
+            )
+        )
+    ])
+    .assign(
+        quality=lambda df: pd.Categorical(
+            df["quality"],
+            categories=["overall", *QUALITY],
+        )
+    )
+    .merge(bounds)
+    .set_index(["epoch", "period", "quality"])
+    .sort_index()
+    .pipe(
+        lambda df: DataFrame({
+            "ratio": df["ratio"],
+            f"{r.conf:.0%} CI": df["conf.low"],
+            "": df["conf.high"],
+            "z": df["statistic"],
+            "p": df["adj.p.value"],
+        }, df.index)
+    )
+)
+quality = (
+    r.cdf_qe
+    .assign(
+        epoch=lambda df: df["epoch"].astype(int),
+        quality=lambda df: df["contrast"].str.extract(r"^(\S*)\s"),
+    )
+    .assign(quality=lambda df: pd.Categorical(
+        df["quality"],
+        categories=["overall", *QUALITY],
+    ))
+    .merge(bounds)
+    .set_index(["epoch", "period", "quality"])
+    .sort_index()
+    .pipe(
+        lambda df: DataFrame({
+            "ratio": df["ratio"],
+            f"{r.conf:.0%} CI": df["conf.low"],
+            "": df["conf.high"],
+            "z": df["statistic"],
+            "p": df["adj.p.value"],
+        }, df.index)
+    )
+)
+table = (
+    pd.concat({
+        "Estimated marginal means": emm,
+        "Epoch vs grand mean": effect,
+        "Epoch vs previous epoch": seq,
+        "Quality vs grand mean": quality,
+    }, axis=1)
+    .reset_index()
+    .assign(
+        epoch=lambda df: df["epoch"].astype(str)+". "+df.pop("period")
+    )
+    .set_index(["epoch", "quality"])
+)
+
+num_cols = [c != "p" for c in table.columns.get_level_values(1)]
+pv_cols = [c == "p" for c in table.columns.get_level_values(1)]
+
+(
+    table
+    .style
+    .format(
+        "{:.2f}", subset=pd.IndexSlice[:, num_cols],
+        na_rep="-", escape="latex",
+    )
+    .format(
+        "{:.3f}", subset=pd.IndexSlice[:, pv_cols],
+        na_rep="-", escape="latex",
+    )
+    .pipe(lambda df: print(
+        df.to_latex(
+            hrules=True,
+            multicol_align="c",
+            multirow_align="t",
+            position="htb!",
+        )
+    ))
+)
+```
+
+```{python}
+(
+    pd.concat([
+        r.cdf_e.assign(
+            epoch=lambda df: (
+                df["contrast"]
+                .str.extract(r"epoch(\d+)")
+                .astype(int)
+            ),
+            quality="overall",
+        ),
+    ])
+)
+```
+
+## Supplement: quality effects
+
+```{r}
+emm  <- emmeans(rg, ~epoch*quality)
+cvec <- rep(0L, length(emm@levels$epoch))
+cvec[c(5, 10)] <- c(-1L, 1L)
+
+C1 <- rlang::ll(
+    "Overall"        = c(cvec, cvec, cvec) / 3,
+    "Low quality"    = c(cvec, 0L*cvec, 0L*cvec),
+    "Medium quality" = c(0L*cvec, cvec, 0L*cvec),
+    "High quality"   = c(0L*cvec, 0L*cvec, cvec),
+)
+C2 <- rlang::ll(
+    "Low quality"    = -c(2/3*cvec, -cvec/3, -cvec/3),
+    "Medium quality" = -c(-cvec/3, 2/3*cvec, -cvec/3),
+    "High quality"   = -c(-cvec/3, -cvec/3, 2/3*cvec),
+)
+con1 <- contrast(emm, method = C1)
+con2 <- contrast(emm, method = C2)
+
+cdf1 <- .tidy(con1)
+cdf2 <- .tidy(con2)
+```
+
+```{python}
+lo = f"[{r.alpha/2:.1%}"
+hi = f"{(1 - r.alpha/2):.1%}]"
+cols = ["contrast", "ratio", "conf.low", "conf.high", "adj.p.value"]
+rename = {
+    "conf.low": lo,
+    "conf.high": hi,
+    "adj.p.value": "p",
+}
+table = pd.concat(
+    {
+        "Decrease": (
+            r.cdf1[cols]
+            .rename(columns=rename)
+            .set_index("contrast", drop=True)
+        ),
+        "Relative": (
+            r.cdf2[cols]
+            .rename(columns=rename)
+            .set_index("contrast", drop=True)
+        )
+    },
+    axis=1,
+)
+# Print nicely to Latex using pandas styler
+(
+    table
+    .style
+    .format("{:.2f}", na_rep="-", escape="latex")
+    .format(
+        "{:.3f}", subset=[("Decrease", "p"), ("Relative", "p")],
+        na_rep="-", escape="latex"\
+    )
+    .pipe(lambda df: print(
+        df.to_latex(
+            hrules=True,
+            multicol_align="c",
+            multirow_align="t",
+            position="htb!",
+        )
+    ))
+)
+```

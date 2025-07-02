@@ -1,0 +1,636 @@
+schema: '2.0'
+stages:
+  posts:
+    cmd: python scripts/make_posts.py
+    deps:
+    - path: data/raw/imputed-likes.parquet
+      hash: md5
+      md5: 58e040185a74bfb5b9130a3060431bd4
+      size: 7809786
+    - path: data/raw/metadata.parquet
+      hash: md5
+      md5: aebcbb9c38bd489652c244b3991e5577
+      size: 4752
+    - path: data/raw/post-content-us.parquet
+      hash: md5
+      md5: 592272c059b364cd50d5da1b5141412c
+      size: 448162360
+    - path: data/raw/posts-us.parquet
+      hash: md5
+      md5: ffc891fc3fd760445266d7bdf1a4d4ba
+      size: 563357107
+    - path: scripts/make_posts.py
+      hash: md5
+      md5: 9a5795ded52bf6bc4f41840d3d211861
+      size: 3609
+    params:
+      params.yaml:
+        data:
+          usecols:
+          - key
+          - country
+          - name
+          - quality
+          - media
+          - ideology
+          - followers
+          - timestamp
+          - type
+          - author
+          - likes
+          - comments
+          - shares
+          - reactions_LIKE
+          - reactions_LOVE
+          - reactions_WOW
+          - reactions_HAHA
+          - reactions_ANGRY
+          - reactions_SAD
+          - post_url
+          author:
+          - page
+          imputation:
+            source: likes
+            target: likes_combined
+    outs:
+    - path: data/proc/counts.parquet
+      hash: md5
+      md5: 564fc39053042b2beefabf7bcb49882c
+      size: 137692
+    - path: data/proc/posts.parquet
+      hash: md5
+      md5: aed2b18f6ad50fffc0bcfd1d04005026
+      size: 212663564
+    - path: data/proc/text.parquet
+      hash: md5
+      md5: d0ec7bd6371266f5bc3575c66c2d068a
+      size: 448144561
+  glmm@reactions:
+    cmd: Rscript scripts/glmm_reactions.R
+    deps:
+    - path: data/proc/news.parquet
+      hash: md5
+      md5: d4aa6861128bfc0f3d5ec765d712acff
+      size: 212612611
+    - path: scripts/glmm_reactions.R
+      hash: md5
+      md5: a4b1ab59e4d29cbb99683dc914af6400
+      size: 2513
+    outs:
+    - path: models/glmm/reactions
+      hash: md5
+      md5: 0231c3795d5ede6b7c73ad75e53dfc33.dir
+      size: 278466661
+      nfiles: 1
+  dataset:
+    cmd: Rscript scripts/make_dataset.R
+    deps:
+    - path: data/proc/news.parquet
+      hash: md5
+      md5: d4aa6861128bfc0f3d5ec765d712acff
+      size: 212612611
+    - path: models/glmm/reactions
+      hash: md5
+      md5: 0231c3795d5ede6b7c73ad75e53dfc33.dir
+      size: 278466661
+      nfiles: 1
+    - path: scripts/make_dataset.R
+      hash: md5
+      md5: 298c85c5037800e75c302b25415d0201
+      size: 3513
+    outs:
+    - path: data/proc/dataset.parquet
+      hash: md5
+      md5: 4d5451f670586fd1e2c60464ab9ea562
+      size: 228959586
+  timeseries:
+    cmd: python scripts/make_timeseries.py
+    deps:
+    - path: data/proc/weekly-non-news.parquet
+      hash: md5
+      md5: 523c56136edfc0adbca6b573f364466b
+      size: 89102
+    - path: data/proc/weekly.parquet
+      hash: md5
+      md5: d3cd644302c22e139dd65ec0317f0dd2
+      size: 919967
+    - path: scripts/make_timeseries.py
+      hash: md5
+      md5: bdeb15b74335d45e10e7320150fe15ac
+      size: 2373
+    outs:
+    - path: data/proc/timeseries.parquet
+      hash: md5
+      md5: 9550360b8be3b1de45242e7cb80ba06a
+      size: 286405
+  changepoints:
+    cmd: python scripts/make_changepoints.py
+    deps:
+    - path: data/proc/timeseries.parquet
+      hash: md5
+      md5: c0b7085923a63bc7eaadb8a6b2fb28f8
+      size: 13498517
+    - path: data/raw/changepoints
+      hash: md5
+      md5: db3260c153104b310319da265936e23a.dir
+      size: 5875940
+      nfiles: 6
+    - path: scripts/make_changepoints.py
+      hash: md5
+      md5: 773c540f446bbb73c607150b0cd04bc3
+      size: 7293
+    params:
+      params.yaml:
+        changepoints:
+          timescale: ${eval:365.25 / 12 / 7 * 2}
+          peaks:
+            distance: ${..timescale}
+            prominence: 0.05
+            height: 0.5
+          subsets:
+          - reactions-mu-cv
+          - reactions-rel-mu-cv
+          use: reactions-rel-mu-cv
+    outs:
+    - path: data/proc/changepoints.parquet
+      hash: md5
+      md5: 65f037a965c60f9391ad03c1624ac8ae
+      size: 4891
+    - path: data/proc/epochs.parquet
+      hash: md5
+      md5: 0d550fff47079d57528d77670c9cefe0
+      size: 263808010
+  glmm-changepoints:
+    cmd: Rscript scripts/glmm_changepoints.R
+    deps:
+    - path: data/proc/dataset.parquet
+      hash: md5
+      md5: 039fe67c51129bc939223850bf3f5ea6
+      size: 228959841
+    - path: data/proc/epochs.parquet
+      hash: md5
+      md5: fb3906f64d045f17bf3c4f8cbdf0d411
+      size: 130040496
+    - path: scripts/glmm_changepoints.R
+      hash: md5
+      md5: a9d1f60b3383c3200f53d6776ca21174
+      size: 2773
+    outs:
+    - path: models/glmm/changepoints/basic.rds
+      hash: md5
+      md5: 09ee7d0148f25b217fefa3e175e17351
+      size: 170650121
+  changepoints-detect:
+    cmd: Rscript scripts/changepoints_detect.R
+    deps:
+    - path: data/proc/signal.parquet
+      hash: md5
+      md5: ceb7591571e5e6be8ba4cfac78ca5a09
+      size: 28284
+    - path: scripts/changepoints_detect.R
+      hash: md5
+      md5: f41ef65de133023186e940202959b6bf
+      size: 2369
+    params:
+      params.yaml:
+        changepoints.beast:
+          seed: 303
+          n_runs: 1000
+          metadata:
+            isRegularOrdered: false
+            whichDimIsTime: 1
+            deltaTime: ${eval:1 / 52}
+            season: none
+            period: none
+            hasOutlier: true
+            deseasonalize: false
+            detrend: false
+          prior:
+            trendMinOrder: 0
+            trendMaxOrder: 1
+            trendMinKnotNum: 0
+            trendMaxKnotNum: 30
+            trendMinSepDist: 13
+        changepoints.subsets:
+          reactions-mu-cv:
+          - reactions_mu
+          - reactions_cv
+          reactions-rel-mu-cv:
+          - reactions_rel_mu
+          - reactions_rel_cv
+    outs:
+    - path: data/proc/beast.parquet
+      hash: md5
+      md5: 9390cd3dd9e8a66a6fd91261599890d5
+      size: 180195
+  signal:
+    cmd: python scripts/make_signal.py
+    deps:
+    - path: data/proc/weekly.parquet
+      hash: md5
+      md5: d3cd644302c22e139dd65ec0317f0dd2
+      size: 919967
+    - path: scripts/make_signal.py
+      hash: md5
+      md5: c896643e15931f45fbc81ffce5b962a1
+      size: 1394
+    outs:
+    - path: data/proc/signal.parquet
+      hash: md5
+      md5: ceb7591571e5e6be8ba4cfac78ca5a09
+      size: 28284
+  changepoints-postprocess:
+    cmd: python scripts/changepoints_postprocess.py
+    deps:
+    - path: data/proc/beast.parquet
+      hash: md5
+      md5: 9390cd3dd9e8a66a6fd91261599890d5
+      size: 180195
+    - path: scripts/changepoints_postprocess.py
+      hash: md5
+      md5: 7ed13cfdba2146fc79faa5a44f168265
+      size: 7577
+    params:
+      params.yaml:
+        changepoints.peaks:
+          distance: ${..timescale}
+          prominence: 0.05
+          height: 0.5
+        changepoints.subsets:
+          reactions-mu-cv:
+          - reactions_mu
+          - reactions_cv
+          reactions-rel-mu-cv:
+          - reactions_rel_mu
+          - reactions_rel_cv
+        changepoints.timescale: ${eval:365.25 / 12 / 7 * 2}
+        changepoints.use: reactions-rel-mu-cv
+        epochs:
+          min_posts: 20
+    outs:
+    - path: data/proc/changepoints.parquet
+      hash: md5
+      md5: 62c74c43a90c989e92c32a21d9ec687a
+      size: 4787
+    - path: data/proc/epochs.parquet
+      hash: md5
+      md5: 2c66b4fee74a1a4a3cda0f5c115761a5
+      size: 130038464
+  weekly:
+    cmd: python scripts/make_weekly.py
+    deps:
+    - path: data/proc/dataset.parquet
+      hash: md5
+      md5: 4d5451f670586fd1e2c60464ab9ea562
+      size: 228959586
+    - path: data/proc/non-news.parquet
+      hash: md5
+      md5: 333a460b62e2e4a72eade2fc6fdde0c9
+      size: 16120361
+    - path: scripts/make_weekly.py
+      hash: md5
+      md5: 4a8f666cf1c5664c10b19e957c4fe835
+      size: 2936
+    outs:
+    - path: data/proc/weekly-non-news.parquet
+      hash: md5
+      md5: 523c56136edfc0adbca6b573f364466b
+      size: 89102
+    - path: data/proc/weekly.parquet
+      hash: md5
+      md5: d3cd644302c22e139dd65ec0317f0dd2
+      size: 919967
+  glmm-changepoints-basic:
+    cmd: Rscript scripts/glmm_changepoints_basic.R
+    deps:
+    - path: data/proc/dataset.parquet
+      hash: md5
+      md5: 00d48c755447568ac6a1cfb0e434c39f
+      size: 228960076
+    - path: data/proc/epochs.parquet
+      hash: md5
+      md5: a3f17e56e4b814fc0c404f668e1ff300
+      size: 120665066
+    - path: scripts/glmm_changepoints_basic.R
+      hash: md5
+      md5: 908ac997f883cc6c52e3c2123157fcf5
+      size: 2736
+    outs:
+    - path: models/glmm/changepoints/basic.rds
+      hash: md5
+      md5: 114a264525b97a08ce78748c86900c4c
+      size: 129269941
+  labels@political:
+    cmd: python scripts/make_political.py
+    deps:
+    - path: data/proc/text.parquet
+      hash: md5
+      md5: d0ec7bd6371266f5bc3575c66c2d068a
+      size: 448144561
+    - path: scripts/make_political.py
+      hash: md5
+      md5: 58d099a0476e40fd6f81e8db612d86a4
+      size: 1388
+    params:
+      params.yaml:
+        ml.inference:
+          batch_size: 32
+        ml.labels.political:
+          name: sztal/erc-newsuse-political
+          revision: fef010024063951549e2f98203689ee1581fd39f
+    outs:
+    - path: data/proc/cls-political.parquet
+      hash: md5
+      md5: d86574646b1e6e44ff3b3634cfb5ea5d
+      size: 118003043
+  labels@negativity:
+    cmd: python scripts/make_negativity.py
+    deps:
+    - path: data/proc/text.parquet
+      hash: md5
+      md5: d0ec7bd6371266f5bc3575c66c2d068a
+      size: 448144561
+    - path: scripts/make_negativity.py
+      hash: md5
+      md5: 9fda143df7115e0de623d55e2a9aad23
+      size: 1389
+    params:
+      params.yaml:
+        ml.inference:
+          batch_size: 32
+        ml.labels.negativity:
+          name: sztal/erc-newsuse-negativity
+          revision: ca2667b6ab5c6ea3f2e3b6bd17553e494a8f8723
+    outs:
+    - path: data/proc/cls-negativity.parquet
+      hash: md5
+      md5: 1bccdaab65575381912b1bc35a547275
+      size: 116891865
+  daily:
+    cmd: python scripts/make_daily.py
+    deps:
+    - path: data/proc/dataset.parquet
+      hash: md5
+      md5: 039fe67c51129bc939223850bf3f5ea6
+      size: 228959841
+    - path: scripts/make_daily.py
+      hash: md5
+      md5: 1c0ec356a7e65168547de3fb314d3455
+      size: 1373
+    outs:
+    - path: data/proc/daily.parquet
+      hash: md5
+      md5: 547c7fe35a75012260264b21e42582b0
+      size: 868972
+  clusters:
+    cmd: python scripts/make_clusters.py
+    deps:
+    - path: data/proc/dataset.parquet
+      hash: md5
+      md5: 00d48c755447568ac6a1cfb0e434c39f
+      size: 228960076
+    - path: scripts/make_clusters.py
+      hash: md5
+      md5: c96df5b22812ffee3019a64b1cd64fb5
+      size: 2036
+    params:
+      params.yaml:
+        clusters:
+          cluster3:
+            birch:
+              n_clusters: 3
+              threshold: 0.1
+          cluster2:
+            threshold: 1000
+    outs:
+    - path: data/proc/clusters.parquet
+      hash: md5
+      md5: fe9085ef74fd1513f065ad8301132d4f
+      size: 97989576
+  non-news:
+    cmd: python scripts/make_nonnews.py
+    deps:
+    - path: data/raw/non-news-us.parquet
+      hash: md5
+      md5: d666e83fa6f7a4beedb29c6ae355cf3f
+      size: 9893907
+    - path: scripts/make_nonnews.py
+      hash: md5
+      md5: aad071e131b57f6f7cee42127fa5212e
+      size: 1105
+    params:
+      params.yaml:
+        data.author:
+        - page
+        data.usecols:
+        - key
+        - country
+        - name
+        - quality
+        - media
+        - ideology
+        - followers
+        - timestamp
+        - type
+        - author
+        - reactions
+        - comments
+        - shares
+        - reactions_LIKE
+        - reactions_LOVE
+        - reactions_WOW
+        - reactions_HAHA
+        - reactions_ANGRY
+        - reactions_SAD
+        - post_url
+    outs:
+    - path: data/proc/non-news.parquet
+      hash: md5
+      md5: 333a460b62e2e4a72eade2fc6fdde0c9
+      size: 16120361
+  glmm-non-news:
+    cmd: Rscript scripts/glmm_nonnews.R
+    deps:
+    - path: data/proc/dataset.parquet
+      hash: md5
+      md5: 039fe67c51129bc939223850bf3f5ea6
+      size: 228959841
+    - path: data/proc/epochs.parquet
+      hash: md5
+      md5: fb3906f64d045f17bf3c4f8cbdf0d411
+      size: 130040496
+    - path: data/proc/non-news.parquet
+      hash: md5
+      md5: 55a1c855acae9360353fe4c3722c659d
+      size: 16120174
+    - path: scripts/glmm_nonnews.R
+      hash: md5
+      md5: a7ac6e144b43f4e506c9c44fb897065c
+      size: 3616
+    outs:
+    - path: models/glmm/non-news
+      hash: md5
+      md5: abc8583b0c8eb41a89acda3554a15fa9.dir
+      size: 320632735
+      nfiles: 2
+  algo-changes:
+    cmd: python scripts/make_algochanges.py
+    deps:
+    - path: data/proc/dataset.parquet
+      hash: md5
+      md5: 76eb37665f3f59d2089f817cc9ae2f4c
+      size: 228959761
+    - path: data/raw/algo-changes.parquet
+      hash: md5
+      md5: 01513c49d94556eb0aabad4228c34304
+      size: 32778
+    - path: scripts/make_algochanges.py
+      hash: md5
+      md5: 29ae41f8eb95ba81966ad91dac5194d2
+      size: 4915
+    params:
+      params.yaml:
+        changepoints.use: reactions-rel-mu-cv
+        epochs:
+          min_posts: 20
+    outs:
+    - path: data/proc/algo-changes.parquet
+      hash: md5
+      md5: eaae0015f8afb951b9d9f1cdafbdf5ee
+      size: 28852
+    - path: data/proc/algo-matches.parquet
+      hash: md5
+      md5: a67f3c2c43ed570df871f3ceb0364c28
+      size: 19244
+    - path: data/proc/algo-meta.parquet
+      hash: md5
+      md5: eedbf47d86ecf344c8559654f7192f6e
+      size: 9684
+    - path: data/proc/algos.parquet
+      hash: md5
+      md5: ca15ccf065af9b69e0c5d3e4862f22cc
+      size: 130059995
+  glmm-news:
+    cmd: Rscript scripts/glmm_news.R
+    deps:
+    - path: data/proc/dataset.parquet
+      hash: md5
+      md5: 4d5451f670586fd1e2c60464ab9ea562
+      size: 228959586
+    - path: data/proc/epochs.parquet
+      hash: md5
+      md5: 2c66b4fee74a1a4a3cda0f5c115761a5
+      size: 130038464
+    - path: scripts/glmm_news.R
+      hash: md5
+      md5: 1d03650df06ae1685afaa7b751f4fcbd
+      size: 2764
+    outs:
+    - path: models/glmm/news
+      hash: md5
+      md5: e9c111b3f403e7c9990b657bdcaa2ebe.dir
+      size: 170649465
+      nfiles: 1
+  glmm-both:
+    cmd: Rscript scripts/glmm_both.R
+    deps:
+    - path: data/proc/dataset.parquet
+      hash: md5
+      md5: 4d5451f670586fd1e2c60464ab9ea562
+      size: 228959586
+    - path: data/proc/epochs.parquet
+      hash: md5
+      md5: 2c66b4fee74a1a4a3cda0f5c115761a5
+      size: 130038464
+    - path: data/proc/non-news.parquet
+      hash: md5
+      md5: 333a460b62e2e4a72eade2fc6fdde0c9
+      size: 16120361
+    - path: scripts/glmm_both.R
+      hash: md5
+      md5: 4f42fffb7abd3a5e635dfd260591e534
+      size: 3614
+    outs:
+    - path: models/glmm/both
+      hash: md5
+      md5: cb0e0eff8c0fe2449d86e715d136a869.dir
+      size: 492955780
+      nfiles: 3
+  news:
+    cmd: python scripts/make_news.py
+    deps:
+    - path: data/raw/imputed-reactions.parquet
+      hash: md5
+      md5: dab5a61987ef491b3bdf9792e0084534
+      size: 7809831
+    - path: data/raw/metadata.parquet
+      hash: md5
+      md5: aebcbb9c38bd489652c244b3991e5577
+      size: 4752
+    - path: data/raw/news-us.parquet
+      hash: md5
+      md5: ffc891fc3fd760445266d7bdf1a4d4ba
+      size: 563357107
+    - path: scripts/make_news.py
+      hash: md5
+      md5: 27efd07011b546c44749f4f524e54b74
+      size: 3000
+    params:
+      params.yaml:
+        data:
+          usecols:
+          - key
+          - country
+          - name
+          - quality
+          - media
+          - ideology
+          - followers
+          - timestamp
+          - type
+          - author
+          - reactions
+          - comments
+          - shares
+          - reactions_LIKE
+          - reactions_LOVE
+          - reactions_WOW
+          - reactions_HAHA
+          - reactions_ANGRY
+          - reactions_SAD
+          - post_url
+          author:
+          - page
+          imputation:
+            source: reactions
+            target: reactions_combined
+    outs:
+    - path: data/proc/counts.parquet
+      hash: md5
+      md5: 564fc39053042b2beefabf7bcb49882c
+      size: 137692
+    - path: data/proc/news.parquet
+      hash: md5
+      md5: d4aa6861128bfc0f3d5ec765d712acff
+      size: 212612611
+  comscore:
+    cmd: python scripts/make_comscore.py
+    deps:
+    - path: data/raw/comscore.parquet
+      hash: md5
+      md5: c2314ce5a3a9c8978c61f7e3dc13a5cb
+      size: 15699
+    - path: scripts/make_comscore.py
+      hash: md5
+      md5: 9bf8b4ce578e7d8e943a2f889862590d
+      size: 2166
+    params:
+      params.yaml:
+        comscore:
+          imputation:
+            limit: 6
+    outs:
+    - path: data/proc/comscore.parquet
+      hash: md5
+      md5: 8650929cce67478e1d71e75d5db79fa3
+      size: 13849
