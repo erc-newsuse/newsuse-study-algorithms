@@ -553,9 +553,9 @@ stages:
     outs:
     - path: models/glmm/both
       hash: md5
-      md5: cb0e0eff8c0fe2449d86e715d136a869.dir
-      size: 492955780
-      nfiles: 3
+      md5: 842016959575dbdb8b4bb4d0cc3efe8a.dir
+      size: 175179364
+      nfiles: 1
   news:
     cmd: python scripts/make_news.py
     deps:
