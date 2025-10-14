@@ -1,5 +1,9 @@
 # Backups
 **/*-BACKUP*
+/models-backup
+# Ad hoc data files
+/*.parquet
+/*.xlsx
 # Root level
 /figures
 .vscode
