@@ -1,7 +1,9 @@
 # %% ---------------------------------------------------------------------------------
 
+import joblib
 import numpy as np
-from newsuse.data import DataFrame, sotrender
+import pandas as pd
+from newsuse.data import DataFrame
 
 from project import config, paths
 
@@ -27,18 +29,40 @@ imputed = DataFrame.from_(
 # %% ---------------------------------------------------------------------------------
 
 data = (
-    sotrender.read_data(
-        paths.raw / "news-*.parquet",
-        progress=True,
-        metadata={"country": r"^.+-(.+)\..+$"},
-        keycol="key",
+    pd.concat(
+        {
+            p.name.split(".")[0].split("-")[-1]: DataFrame.from_(p)
+            for p in paths.raw.glob("news-*.parquet")
+        }
     )
-    .assign(key=lambda df: df["key"].str.removeprefix("sotrender@"))
-    .query(f"author.isin({config.author})")
+    .reset_index(level=0, names="country")
+    .reset_index(drop=True)
+    .merge(imputed, how="left", on="key")
+    .assign(key=lambda df: df["fb_post_id"].str.strip())
+    .assign(
+        key=lambda df: "sotrender@"
+        + np.where(
+            df["key"].str.startswith("NA_") | df["key"].str.endswith("_NA"),
+            (df["key"] + "__" + df["check"]).map(joblib.hash),
+            df["key"].map(joblib.hash),
+        )
+    )
+    .drop_duplicates(subset="key", ignore_index=True)
+    .set_index("key", verify_integrity=True)
+    .reset_index()
+    .rename(columns={"date": "timestamp"})
+    .assign(
+        timestamp=lambda df: pd.to_datetime(df["timestamp"] + " " + df["hour"], utc=True)
+    )
+)
+
+# %% ---------------------------------------------------------------------------------
+
+data = (
+    data.query(f"author.isin({config.author})")
     .reset_index(drop=True)
     .merge(metadata, on="name", how="left")
     .rename(columns={"likes": "reactions"})
-    .merge(imputed, how="left", on="key")
     .assign(
         reactions=lambda df: (
             df[config.imputation.source]
@@ -67,7 +91,7 @@ counts = (
 )
 keys = counts.columns.tolist()[:-1]
 
-# %%
+# %% ---------------------------------------------------------------------------------
 
 data = data.merge(counts, on=keys, how="left")
 idx = data.columns.tolist().index("reactions")

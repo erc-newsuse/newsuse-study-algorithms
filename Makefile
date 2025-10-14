@@ -23,6 +23,7 @@ init:
 	mkdir -p scripts
 	dvc init --force
 	dvc remote add  --default algorithms ${PWD}/data/remote --local --force
+	dvc config core.autostage true
 	R -e 'remotes::install_version("glmmTMB", version = "1.1.10", repos = "http://cran.us.r-project.org", upgrade = "never")'
 	R -e 'remotes::install_version("Rbeast", version = "1.0.1", repos = "http://cran.us.r-project.org", upgrade = "never")'
 
