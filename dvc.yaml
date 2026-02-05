@@ -7,6 +7,7 @@ stages:
     - data/raw/news-us.parquet
     - data/raw/metadata.parquet
     - data/raw/imputed-reactions.parquet
+    - data/raw/2025.parquet
     params:
     - data
     outs:
@@ -42,6 +43,7 @@ stages:
     deps:
     - stages/make_nonnews.py
     - data/raw/non-news-us.parquet
+    - data/raw/2025.parquet
     params:
     - data.author
     - data.usecols

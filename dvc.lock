@@ -70,8 +70,8 @@ stages:
     deps:
     - path: data/proc/news.parquet
       hash: md5
-      md5: 1047c20fb28aa47da4fd9c7d8643de7b
-      size: 213666995
+      md5: 2f2516a74ccde638f187b31da971db9d
+      size: 242899234
     - path: stages/glmm_reactions.R
       hash: md5
       md5: 45a5d9d6e38f2a0d4f857326e17e1d93
@@ -79,8 +79,8 @@ stages:
     outs:
     - path: models/glmm/reactions
       hash: md5
-      md5: b8d8267a764d68a460f6979adc7f5647.dir
-      size: 280183002
+      md5: d163a30017ea39800d1982950cb25fee.dir
+      size: 303035959
       nfiles: 1
   dataset:
     cmd: Rscript stages/make_dataset.R
@@ -408,16 +408,20 @@ stages:
       md5: fe9085ef74fd1513f065ad8301132d4f
       size: 97989576
   non-news:
-    cmd: python scripts/make_nonnews.py
+    cmd: python stages/make_nonnews.py
     deps:
+    - path: data/raw/2025.parquet
+      hash: md5
+      md5: 53e7f6cc6ac6b1f8f19f315c228e127e
+      size: 35097308
     - path: data/raw/non-news-us.parquet
       hash: md5
       md5: d666e83fa6f7a4beedb29c6ae355cf3f
       size: 9893907
-    - path: scripts/make_nonnews.py
+    - path: stages/make_nonnews.py
       hash: md5
-      md5: aad071e131b57f6f7cee42127fa5212e
-      size: 1105
+      md5: 1dea731507b3cf7066335187bc685c9e
+      size: 1886
     params:
       params.yaml:
         data.author:
@@ -446,8 +450,8 @@ stages:
     outs:
     - path: data/proc/non-news.parquet
       hash: md5
-      md5: 333a460b62e2e4a72eade2fc6fdde0c9
-      size: 16120361
+      md5: b727d491c2fc4d7a012ec49bb7fe7a4f
+      size: 18003883
   glmm-non-news:
     cmd: Rscript scripts/glmm_nonnews.R
     deps:
@@ -559,6 +563,10 @@ stages:
   news:
     cmd: python stages/make_news.py
     deps:
+    - path: data/raw/2025.parquet
+      hash: md5
+      md5: 53e7f6cc6ac6b1f8f19f315c228e127e
+      size: 35097308
     - path: data/raw/imputed-reactions.parquet
       hash: md5
       md5: dab5a61987ef491b3bdf9792e0084534
@@ -573,8 +581,8 @@ stages:
       size: 563357107
     - path: stages/make_news.py
       hash: md5
-      md5: d6d2f839fd064d2ee4c6e9c119ee30f4
-      size: 3804
+      md5: dfa7c527b0b3597abf3aeea4ff0f9810
+      size: 5109
     params:
       params.yaml:
         data:
@@ -607,12 +615,12 @@ stages:
     outs:
     - path: data/proc/counts.parquet
       hash: md5
-      md5: 4407d996d8195a0da34446340bf05131
-      size: 137508
+      md5: 790521947ddd700fb7462ba512eb7498
+      size: 148388
     - path: data/proc/news.parquet
       hash: md5
-      md5: 1047c20fb28aa47da4fd9c7d8643de7b
-      size: 213666995
+      md5: 941c6d78c6db5c5483d28e48f2abfa52
+      size: 242768683
   comscore:
     cmd: python scripts/make_comscore.py
     deps:

@@ -1,5 +1,7 @@
 # %% ---------------------------------------------------------------------------------
 
+from datetime import date
+
 import joblib
 import numpy as np
 import pandas as pd
@@ -75,9 +77,36 @@ data = (
 
 assert data["key"].is_unique
 
+# %% Add 2025 data ----------------------------------------------------------------
+
+with pd.option_context("future.no_silent_downcasting", True):
+    data = (
+        pd.concat(
+            [
+                data,
+                DataFrame.from_(paths.raw / "2025.parquet")
+                .rename(columns={"likes": "reactions"})
+                .drop(columns=["ini", "link_title", "content_type"])
+                .pipe(lambda df: df[df.name.isin(data.name.unique())]),
+            ]
+        )
+        .groupby(["name"])
+        .apply(
+            lambda df: df.assign(
+                **{
+                    col: df[col].ffill()
+                    for col in ["country", "quality", "media", "ideology", "followers"]
+                }
+            ),
+            include_groups=False,
+        )
+        .reset_index(drop=False)
+        .assign(timestamp=lambda df: pd.to_datetime(df["timestamp"], utc=True))
+        .convert_dtypes()
+    )
+
 # %% Postprocess ---------------------------------------------------------------------
 
-data.insert(2, "quality", data.pop("quality"))
 idx = data.columns.tolist().index("timestamp") + 1
 data.insert(idx, "day", data.timestamp.dt.day)
 data.insert(idx, "month", data.timestamp.dt.month)
@@ -107,10 +136,18 @@ avg = avg.reset_index(keys).reset_index(drop=True)
 
 data = data.merge(avg, on=keys)
 
+# %% ---------------------------------------------------------------------------------
+
+data = data[data["reactions"].notnull()].reset_index(drop=True)
+data = data.sort_values(["name", "timestamp"], ignore_index=True)
+
 # %% Consistency checks --------------------------------------------------------------
 
 x = data["reactions"].to_numpy()
 assert (np.isnan(x) | (x % 1 == 0)).all()
+
+assert data.timestamp.min().date() == date(2016, 1, 1), "Unexpected start date"
+assert data.timestamp.max().date() == date(2025, 12, 16), "Unexpected end date"
 
 # %% Save data -----------------------------------------------------------------------
 
