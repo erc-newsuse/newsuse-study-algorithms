@@ -181,16 +181,16 @@ stages:
       md5: 09ee7d0148f25b217fefa3e175e17351
       size: 170650121
   changepoints-detect:
-    cmd: Rscript scripts/changepoints_detect.R
+    cmd: Rscript stages/changepoints_detect.R
     deps:
     - path: data/proc/signal.parquet
       hash: md5
-      md5: ceb7591571e5e6be8ba4cfac78ca5a09
-      size: 28284
-    - path: scripts/changepoints_detect.R
+      md5: ca932d172e9c100c1eb1f9270287f7e3
+      size: 30783
+    - path: stages/changepoints_detect.R
       hash: md5
-      md5: f41ef65de133023186e940202959b6bf
-      size: 2369
+      md5: ebcea5f2acc2bfb154d60cd901dcfd53
+      size: 2399
     params:
       params.yaml:
         changepoints.beast:
@@ -221,8 +221,8 @@ stages:
     outs:
     - path: data/proc/beast.parquet
       hash: md5
-      md5: 9390cd3dd9e8a66a6fd91261599890d5
-      size: 180195
+      md5: eddfea6bd9fbfc6b37c6e9676cc61695
+      size: 195193
   signal:
     cmd: python stages/make_signal.py
     deps:

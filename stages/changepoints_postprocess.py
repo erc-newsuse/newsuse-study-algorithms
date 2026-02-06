@@ -26,10 +26,10 @@ raw = (
         lambda df: df.sort_values(["subset", "idx", "date"], ignore_index=True)
         .assign(year=lambda df: df["date"].astype(int))
         .assign(
-            month=lambda df: (np.modf(df["date"])[0] * 12).astype(int) + 1,
+            month=lambda df: (np.modf(df["date"].to_numpy())[0] * 12).astype(int) + 1,
             day=lambda df: (
                 pd.to_datetime(df[["year"]].assign(month=1, day=1))
-                + (np.modf(df["date"])[0] * 365 + df["year"].map(isleap))
+                + (np.modf(df["date"].to_numpy())[0] * 365 + df["year"].map(isleap))
                 .astype(int)
                 .map(timedelta)
             ).dt.day,
@@ -166,7 +166,10 @@ for ts in cdf["timestamp"]:
     epochs.loc[mask, "epoch_start"] = ts
 
 epochs["epoch_t"] = (
-    (epochs["timestamp"] - epochs["epoch_start"]).dt.total_seconds().div(60 * 60 * 24 * 7)
+    (epochs["timestamp"] - epochs["epoch_start"])
+    .astype("timedelta64[ns]")
+    .dt.total_seconds()
+    .div(60 * 60 * 24 * 7)
 )
 
 counts = epochs.groupby(["country", "name", "epoch"]).size().reset_index(name="n_posts")
