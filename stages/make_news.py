@@ -103,6 +103,8 @@ with pd.option_context("future.no_silent_downcasting", True):
         .reset_index(drop=False)
         .assign(timestamp=lambda df: pd.to_datetime(df["timestamp"], utc=True))
         .convert_dtypes()
+        .drop_duplicates(subset=["key"], keep="last")
+        .sort_values(["name", "timestamp"], ignore_index=True)
     )
 
 # %% Postprocess ---------------------------------------------------------------------
@@ -148,6 +150,7 @@ assert (np.isnan(x) | (x % 1 == 0)).all()
 
 assert data.timestamp.min().date() == date(2016, 1, 1), "Unexpected start date"
 assert data.timestamp.max().date() == date(2025, 12, 16), "Unexpected end date"
+assert data["key"].is_unique, "Keys are not unique"
 
 # %% Save data -----------------------------------------------------------------------
 

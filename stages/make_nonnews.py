@@ -36,6 +36,7 @@ data = (
     .query(f"author.isin({config.data.author})")
     .reset_index(drop=True)
     .filter(config.data.usecols, axis="columns")
+    .drop_duplicates(subset="key", keep="last")
     .sort_values(["name", "timestamp"], ignore_index=True)
 )
 for col in ["day", "month", "year"]:
@@ -52,6 +53,7 @@ assert (np.isnan(x) | (x % 1 == 0)).all()
 
 assert data.timestamp.min().date() == date(2016, 1, 1), "Unexpected start date"
 assert data.timestamp.max().date() == date(2025, 12, 15), "Unexpected end date"
+assert data["key"].is_unique, "Keys are not unique"
 
 # %% ---------------------------------------------------------------------------------
 
