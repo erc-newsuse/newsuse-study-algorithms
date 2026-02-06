@@ -10,7 +10,7 @@ library(tibble)
 library(purrr)
 library(glmmTMB)
 
-use_condaenv("newsuse-study-algorithms")
+use_python(normalizePath(R.home("../../bin/python")), required = TRUE)
 
 project <- import("project")
 config  <- project$config
