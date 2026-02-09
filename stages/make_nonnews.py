@@ -36,6 +36,7 @@ data = (
     .query(f"author.isin({config.data.author})")
     .reset_index(drop=True)
     .filter(config.data.usecols, axis="columns")
+    .fillna({"country": "us"})
     .drop_duplicates(subset="key", keep="last")
     .sort_values(["name", "timestamp"], ignore_index=True)
 )
