@@ -101,8 +101,8 @@ stages:
     outs:
     - path: data/proc/dataset.parquet
       hash: md5
-      md5: ac69d88e3fcac6e05328c2676ed2e346
-      size: 267942515
+      md5: 3180fc8f4a5302179544be8c4618f60b
+      size: 249356972
   timeseries:
     cmd: python stages/make_timeseries.py
     deps:
@@ -515,50 +515,50 @@ stages:
       md5: ca15ccf065af9b69e0c5d3e4862f22cc
       size: 130059995
   glmm-news:
-    cmd: Rscript scripts/glmm_news.R
+    cmd: Rscript stages/glmm_news.R
     deps:
     - path: data/proc/dataset.parquet
       hash: md5
-      md5: 4d5451f670586fd1e2c60464ab9ea562
-      size: 228959586
+      md5: ac69d88e3fcac6e05328c2676ed2e346
+      size: 267942515
     - path: data/proc/epochs.parquet
       hash: md5
-      md5: 2c66b4fee74a1a4a3cda0f5c115761a5
-      size: 130038464
-    - path: scripts/glmm_news.R
+      md5: 9ef3bb196a420b35b0e5d01ca0850602
+      size: 142050778
+    - path: stages/glmm_news.R
       hash: md5
-      md5: 1d03650df06ae1685afaa7b751f4fcbd
-      size: 2764
+      md5: 180f6d2a8d75a504a9a0b7d4286701dc
+      size: 2794
     outs:
     - path: models/glmm/news
       hash: md5
-      md5: e9c111b3f403e7c9990b657bdcaa2ebe.dir
-      size: 170649465
+      md5: 1227dd3ee096e62b269af0287154d96c.dir
+      size: 184509027
       nfiles: 1
   glmm-both:
-    cmd: Rscript scripts/glmm_both.R
+    cmd: Rscript stages/glmm_both.R
     deps:
     - path: data/proc/dataset.parquet
       hash: md5
-      md5: 4d5451f670586fd1e2c60464ab9ea562
-      size: 228959586
+      md5: ac69d88e3fcac6e05328c2676ed2e346
+      size: 267942515
     - path: data/proc/epochs.parquet
       hash: md5
-      md5: 2c66b4fee74a1a4a3cda0f5c115761a5
-      size: 130038464
+      md5: 9ef3bb196a420b35b0e5d01ca0850602
+      size: 142050778
     - path: data/proc/non-news.parquet
       hash: md5
-      md5: 333a460b62e2e4a72eade2fc6fdde0c9
-      size: 16120361
-    - path: scripts/glmm_both.R
+      md5: 681eeaedd9020d52f9c24c0d2997d08b
+      size: 17985289
+    - path: stages/glmm_both.R
       hash: md5
-      md5: 4f42fffb7abd3a5e635dfd260591e534
-      size: 3614
+      md5: 23d9ba4eaab58656c1db27e0c3acdb10
+      size: 3644
     outs:
     - path: models/glmm/both
       hash: md5
-      md5: 842016959575dbdb8b4bb4d0cc3efe8a.dir
-      size: 175179364
+      md5: 113c06df94ed8708cdd5a9b5ee5baf2a.dir
+      size: 215286195
       nfiles: 1
   news:
     cmd: python stages/make_news.py
