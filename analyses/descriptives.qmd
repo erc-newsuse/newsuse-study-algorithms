@@ -249,7 +249,7 @@ fig, axes = plt.subplots(ncols=3, figsize=(7, 2.5))
 
 data = (
     dataset
-    .groupby(["quality", "country", "name"])
+    .groupby(["quality", "country", "name"], observed=True)
     .size()
     .reset_index(name="posts")
     .query("posts > 0")
@@ -274,7 +274,7 @@ ax.set_ylim(10**2, 10**6)
 # Box plot of per outlet average reactions by quality
 data = (
     dataset
-    .groupby(["quality", "country", "name"])
+    .groupby(["quality", "country", "name"], observed=True)
     .agg({
         "reactions": "mean",
         "name": "size",

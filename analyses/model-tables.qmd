@@ -35,7 +35,7 @@ library(broom)
 library(broom.mixed)
 library(glmmTMB)
 
-use_condaenv("newsuse-study-algorithms")
+use_python(normalizePath(R.home("../../bin/python")), required = TRUE)
 
 project <- import("project")
 config  <- project$config
@@ -44,12 +44,6 @@ paths   <- project$paths[["__copy__"]]()
 alpha     <- config$inference$alpha
 conf      <- config$inference$conf
 adjust    <- config$inference$adjust
-
-emm_options(
-    emmeans  = list(type = "response", level = conf, adjust = adjust),
-    contrast = list(adjust = adjust),
-    summary  = list(infer = TRUE)
-)
 ```
 
 ```{python}

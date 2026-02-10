@@ -37,7 +37,7 @@ library(reticulate)
 library(lubridate)
 library(glmmTMB)
 
-use_condaenv("newsuse-study-algorithms")
+use_python(normalizePath(R.home("../../bin/python")), required = TRUE)
 
 project <- import("project")
 config  <- project$config
@@ -659,7 +659,7 @@ eff_handles = [
         [0], [0], color=MAIN_COLOR, marker="s", linestyle="",
         markersize=6, label=f"Epoch / Epochs 0-{LAST_NONALGO_EPOCH}",
     ),
-    # Legedn item for confidence intervals
+    # Legend item for confidence intervals
     mpl.lines.Line2D(
         [0], [0], color="black", marker="|", linestyle="",
         markersize=10, markeredgewidth=2, label=f"{r.conf:.0%} CI",

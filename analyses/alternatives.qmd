@@ -100,7 +100,8 @@ reactions = (
     .apply(
         lambda df: df.assign(
             rel=df["reactions"] / df["reactions"].mean()
-        )
+        ),
+        include_groups=False,
     )
     .reset_index(drop=True)
     .groupby(["timestamp"])
