@@ -88,7 +88,9 @@ COLORS    = mpl.rcParams["axes.prop_cycle"].by_key()["color"]
 ELECTIONS = {k: pd.Timestamp(v) for k, v in config.elections.items()}
 
 LAST_EPOCH = 11
-LAST_NONALGO_EPOCH = 4
+START_WAR = 5
+END_WAR = 10
+LAST_NONALGO_EPOCH = START_WAR - 1
 ```
 
 ```{r}
@@ -731,9 +733,9 @@ parallel_trends_pval <- function(E, V, idx = 1L:length(E)) {
 ```{r}
 rlang::ll(
     "before 'War on News'" =
-        parallel_trends_pval(E, V, 1L:(py$LAST_NONALGO_EPOCH+1L)),
-    "after 'War on News'"  =
-        parallel_trends_pval(E, V, (py$LAST_NONALGO_EPOCH+2L):length(E)),
+        parallel_trends_pval(E, V, 1L:py$START_WAR),
+    "during 'War on News'"  =
+        parallel_trends_pval(E, V, (py$START_WAR + 1L):(py$END_WAR + 1L)),
 )
 ```
 
