@@ -118,6 +118,7 @@ def mark_events(signal, events, ax):
         chp, event, ts, typ = row[["Changepoint", "Event", "Date", "Type"]]
         if pd.isnull(ts):
             continue
+        ts = datetime.datetime.fromisoformat(str(ts))
         sts = (ts - pd.Timedelta(days=ts.weekday())).date()
         ypos = signal[sts]
         ax.scatter(
@@ -152,7 +153,7 @@ def mark_events(signal, events, ax):
 ax = axes[0]
 
 S = signal["reactions_rel_mu"]
-color_mu = COLORS[-4]
+color_mu = COLORS[0]
 ax.plot(S.index, S, color=color_mu)
 
 xticks = changepoints["timestamp"]
@@ -176,7 +177,7 @@ mark_events(S, events, ax)
 
 # Plot CV signal ==========================
 ax = axes[1]
-color_cv = COLORS[-2]
+color_cv = COLORS[2]
 S = signal["reactions_rel_cv"]
 ax.plot(S.index, S, color=color_cv, zorder=10)
 ax.set_ylim(.9, 2.15)
@@ -246,11 +247,15 @@ def boldformat(row):
         return F
     return pd.Series(index=row.index)
 
-E = events.copy()
-E["Timestamp"] = E["Timestamp"].dt.date
-E["Lower bound"] = E["Lower bound"].dt.date
-E["Upper bound"] = E["Upper bound"].dt.date
-E["Date"] = E["Date"].dt.date
+E = (
+    events.copy()
+    .rename(columns=str.lower)
+    .rename(columns=str.capitalize)
+)
+E["Timestamp"] = pd.to_datetime(E["Timestamp"]).dt.date
+E["Lower bound"] = pd.to_datetime(E["Lower bound"]).dt.date
+E["Upper bound"] = pd.to_datetime(E["Upper bound"]).dt.date
+E["Date"] = pd.to_datetime(E["Date"]).dt.date
 
 (
     E

@@ -234,9 +234,9 @@ important = {
     (5, "b"): ("5b. Start of 'War on News'", .15),
     (6, "a"): ("6a. Less news", -.15),
     (7, "a"): ("7a. Less news globally", .5),
-    (9, "a"): ("9a. Less news", .225),
-    (9, "b"): ("9b. News ban in Canada", -.35),
-    (11, "a"): ("11a. End of 'War on News'", -.05),
+    (8, "a"): ("8a. Less news", .225),
+    (8, "b"): ("8b. News ban in Canada", -.35),
+    (10, "a"): ("10a. End of 'War on News'", -.05),
 }
 important = (
     events.set_index(["Changepoint", "Event"])
@@ -305,6 +305,7 @@ for ax in axes.flat:
         important[["Date", "Label", "Shift"]]
         .itertuples(index=False)
     ):
+        ts = datetime.datetime.fromisoformat(ts)
         bold = "War" in label
         ax.axvline(
             x=ts,
