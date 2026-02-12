@@ -216,9 +216,9 @@ cdf_si  <- .tidy(con_si)
 ```
 
 ```{r}
-## Custom contrasts for comparing against epochs 1-4
+## Custom contrasts for comparing against epochs 0-4
 cvec <- function(idx) {
-    vec <- c(-rep(1/4, 4L), rep(0, 8L))
+    vec <- c(-rep(1/5, 5L), rep(0, 7L))
     vec[idx+1L] <- vec[idx+1L] + 1
     vec
 }
@@ -403,7 +403,8 @@ sdata = (
 )
 
 counter = 0
-seqy = 10
+ypos = 10
+seqy = ypos * 2
 for idx, row in sdata.iterrows():
     ratio, pv, mid1, mid2 = row[["ratio", "pv", "mid1", "mid2"]]
     epoch1, epoch2 = row[["epoch1", "epoch2"]]
@@ -434,7 +435,7 @@ for idx, row in sdata.iterrows():
     if idx == 0:
         ax.annotate(
             "Difference-in-difference",
-            xy=(mid, 5.5),
+            xy=(mid, ypos),
             ha="center",
             fontsize=5.5,
             fontweight="bold",
@@ -470,7 +471,7 @@ for ts in r.changepoints["timestamp"]:
 ax.tick_params(labelsize=8)
 
 # Mark period with equiproportional trends
-ypos = 6
+ypos = 10
 tdf  = epochs.set_index("epoch")
 ts0  = epochs.loc[0, "start"]
 ts1  = epochs.loc[LAST_NONALGO_EPOCH, "end"]
@@ -478,7 +479,7 @@ mid  = ts0 + (ts1 - ts0) / 2
 ax.axvspan(ts0, ts1, color="gray", alpha=.08, zorder=-100)
 ax.annotate(
     "Equiproportional trends",
-    xy=(mid, 5.5), ha="center", fontsize=6,
+    xy=(mid, ypos), ha="center", fontsize=6,
     fontweight="bold", zorder=100,
     bbox={"facecolor": "white", "pad": 2, "lw": .01},
 )
@@ -725,7 +726,7 @@ parallel_trends_pval <- function(E, V, idx = 1L:length(E)) {
     V <- V[idx, idx]
     # chi-square test statistic
     X  <- as.vector(t(E) %*% solve(V) %*% E)
-    df <- length(E) - 1L  # degrees of freedom
+    df <- length(E) # degrees of freedom
     c(X2 = X, df = df, p = pchisq(X, df = df, lower.tail = FALSE))
 }
 ```
@@ -734,8 +735,10 @@ parallel_trends_pval <- function(E, V, idx = 1L:length(E)) {
 rlang::ll(
     "before 'War on News'" =
         parallel_trends_pval(E, V, 1L:py$START_WAR),
-    "during 'War on News'"  =
-        parallel_trends_pval(E, V, (py$START_WAR + 1L):(py$END_WAR + 1L)),
+    "during 'War on News'" =
+        parallel_trends_pval(E, V, (py$START_WAR+1):(py$END_WAR)),
+    "after 'War on News'"  =
+        parallel_trends_pval(E, V, (py$END_WAR+1):py$LAST_EPOCH)
 )
 ```
 
@@ -904,14 +907,15 @@ did = (
     .merge(bounds)
     .rename(columns={
         "epoch": "Epoch",
+        "period": "Duration",
         "sector_consec": "Comparison"
     })
-    .set_index(["Epoch"])
+    .set_index(["Epoch", "Duration"])
     .sort_index()
     .pipe(
         lambda df: (
             DataFrame({
-                "Ratio of ratios": df["ratio"],
+                "RR": df["ratio"],
                 f"[{r.alpha/2:.1%}": df["conf.low"],
                 f"{r.conf+r.alpha/2:.1%}]": df["conf.high"],
                 "z": df["statistic"],
@@ -936,38 +940,31 @@ eff = (
     .merge(bounds)
     .rename(columns={
         "epoch": "Epoch",
+        "period": "Duration",
         "sector_consec": "Comparison"
     })
-    .set_index(["Epoch"])
+    .set_index(["Epoch", "Duration"])
     .sort_index()
     .pipe(
         lambda df: (
             DataFrame({
-                "Ratio of ratios": df["ratio"],
+                "RR": df["ratio"],
                 f"[{r.alpha/2:.1%}": df["conf.low"],
                 f"{r.conf+r.alpha/2:.1%}]": df["conf.high"],
                 "z": df["statistic"],
                 "p": df["adj.p.value"],
-                "period": df["period"],
             }, index=df.index)
         )
     )
 )
 table = (
     pd.concat({
-        "Difference-in-difference": did,
-        "Cumulative causal effect": eff,
+        "Epochs": eff.index.to_frame().reset_index(drop=True),
+        "Difference-in-difference": pd.concat([DataFrame({}, index=[0]), did], ignore_index=True),
+        "Cumulative causal effect": eff.reset_index(drop=True),
     }, axis=1)
-    .reset_index()
-    .sort_values("Epoch")
-    .assign(
-        Epoch=lambda df: (
-            df["Epoch"].astype(str)
-            +
-            ". " + df.pop(("Cumulative causal effect", "period"))
-        )
-    )
-    .set_index(["Epoch"])
+    .pipe(lambda df: df.set_index(pd.MultiIndex.from_frame(df.pop("Epochs"))))
+    .sort_index()
 )
 num_cols = [c != "p" for c in table.columns.get_level_values(1)]
 pv_cols = [c == "p" for c in table.columns.get_level_values(1)]
@@ -975,6 +972,7 @@ pv_cols = [c == "p" for c in table.columns.get_level_values(1)]
 (
     table
     .style
+    .format_index("{:.0f}", level="Epoch")
     .format(
         "{:.2f}", subset=pd.IndexSlice[:, num_cols],
         na_rep="-", escape="latex",
@@ -999,7 +997,7 @@ pv_cols = [c == "p" for c in table.columns.get_level_values(1)]
 ```{r}
 emm  <- emmeans(rg, ~epoch*quality)
 cvec <- rep(0L, length(emm@levels$epoch))
-cvec[c(5, 10)] <- c(-1L, 1L)
+cvec[c(5, 9)] <- c(-1L, 1L)
 
 C1 <- rlang::ll(
     "Non-news"       = c(cvec, 0L*cvec, 0L*cvec, 0L*cvec),
@@ -1014,10 +1012,10 @@ C2 <- rlang::ll(
     "High quality"   = -c(0L*cvec, -cvec/3, -cvec/3, 2/3*cvec),
 )
 C3 <- rlang::ll(
-    "News"           = c(-cvec, cvec/3, cvec/3, cvec/3),
-    "Low quality"    = c(-cvec, cvec, 0L*cvec, 0L*cvec),
-    "Medium quality" = c(-cvec, 0L*cvec, cvec, 0L*cvec),
-    "High quality"   = c(-cvec, 0L*cvec, 0L*cvec, cvec),
+    "News"           = -c(-cvec, cvec/3, cvec/3, cvec/3),
+    "Low quality"    = -c(-cvec, cvec, 0L*cvec, 0L*cvec),
+    "Medium quality" = -c(-cvec, 0L*cvec, cvec, 0L*cvec),
+    "High quality"   = -c(-cvec, 0L*cvec, 0L*cvec, cvec),
 )
 con1 <- contrast(emm, method = C1)
 con2 <- contrast(emm, method = C2)
