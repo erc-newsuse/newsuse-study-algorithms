@@ -374,7 +374,7 @@ sdata = (
 )
 
 counter = 0
-seqy = 10
+seqy = 20
 for idx, row in sdata.iterrows():
     ratio, pv, mid1, mid2 = row[["ratio", "pv", "mid1", "mid2"]]
     epoch1, epoch2 = row[["epoch1", "epoch2"]]
@@ -405,7 +405,7 @@ for idx, row in sdata.iterrows():
     if idx == 0:
         ax.annotate(
             "Significant change",
-            xy=(mid, 5.5),
+            xy=(mid, 10),
             ha="center",
             fontsize=5.5,
             fontweight="bold",
