@@ -237,6 +237,83 @@ fig.tight_layout()
 fig.savefig(figpath / "changepoints.pdf")
 ```
 
+```{python}
+# CHANGEPOINTS - MEAN ONLY
+fig, ax = plt.subplots(
+    figsize=(7.5, 2),
+    nrows=1,
+)
+
+data = epochs
+idx = data["start"].idxmin()
+data.loc[idx, "start"] -= pd.Timedelta(days=180)
+data.loc[idx, "mid"] -= pd.Timedelta(days=90)
+idx = data["end"].idxmax()
+data.loc[idx, "end"] += pd.Timedelta(days=180)
+data.loc[idx, "mid"] += pd.Timedelta(days=90)
+
+# Mu signal ===========================
+S = signal["reactions_rel_mu"]
+color_mu = COLORS[0]
+ax.plot(S.index, S, color=color_mu)
+
+xticks = changepoints["timestamp"]
+ax_top = ax.secondary_xaxis("top")
+ax_top.set_xticks(xticks)
+ax_top.set_xticklabels(
+    xticks.dt.strftime("%m.%d"),
+    fontsize=6,
+)
+
+ax.set_xlabel(None)
+ax.set_ylabel("Relative mean")
+ax.set_yscale("log", base=2)
+ax.set_ylim(2**-2.5, 2**2.5)
+
+ax.tick_params(bottom=True, labelbottom=True, labelsize=8)
+
+# Move xticks a bit to the bottom
+ax.xaxis.set_tick_params(pad=10)
+# Mark events
+mark_events(S, events, ax)
+# Final touches ==========================
+for ts, l, r in changepoints[["timestamp", "left", "right"]].itertuples(index=False):
+    ax.axvspan(l, r, color="black", alpha=.1)
+    ax.axvline(ts, ls=":", color="k", lw=.5)
+
+# Legend
+handles = [
+    mpl.lines.Line2D(
+        [], [],
+        color="black",
+        marker="*", markersize=15, markeredgecolor="white",
+        label="algorithmic"
+    ),
+    mpl.lines.Line2D(
+        [], [],
+        color="white",
+        marker="*", markersize=10, markeredgecolor="black",
+        label="political"
+    ),
+]
+legend = ax.legend(
+    handles=handles,
+    ncol=len(handles),
+    loc="lower left",
+    prop={"size": 8},
+    frameon=True,
+    framealpha=1,
+)
+for text in legend.get_texts():
+    if text.get_text() == "political":
+        text.set_fontweight("normal")
+    else:
+        text.set_fontweight("bold")
+
+fig.tight_layout()
+fig.savefig(figpath / "changepoints-mean.pdf")
+```
+
 ## Table
 
 ```{python}
