@@ -1,0 +1,510 @@
+---
+title: "Generalized linear mixed model"
+subtitle: "total effects of algorithmic changes"
+author: "Szymon Talaga"
+date: last-modified
+date-format: "MMMM D, YYYY | HH:mm:ss (Z)"
+toc: true
+toc-depth: 3
+toc-location: left
+execute:
+  echo: false
+  warning: false
+  cache: false
+  daemon: false
+format:
+  html:
+    grid:
+      margin-width: 350px
+    embed-resources: true
+  pdf:
+    toc: false
+    number-sections: true
+    colorlinks: true
+reference-location: margin
+citation-location: margin
+---
+
+```{r}
+library(arrow)
+library(stringr)
+library(dplyr)
+library(purrr)
+library(tibble)
+library(emmeans)
+library(broom)
+library(reticulate)
+library(lubridate)
+library(glmmTMB)
+
+use_python(normalizePath(R.home("../../bin/python")), required = TRUE)
+
+project <- import("project")
+config  <- project$config
+paths   <- project$paths[["__copy__"]]()
+
+alpha     <- config$inference$alpha
+conf      <- config$inference$conf
+adjust    <- config$inference$adjust
+
+emm_options(
+    emmeans  = list(type = "response", level = conf, adjust = adjust),
+    contrast = list(adjust = adjust),
+    summary  = list(infer = TRUE),
+    mvt.args = list(abseps = 1e-4)
+)
+```
+
+```{python}
+import importlib
+from typing import Mapping
+import datetime
+import numpy as np
+import pandas as pd
+from scipy import stats
+import matplotlib as mpl
+import matplotlib.dates
+import matplotlib.transforms
+import matplotlib.pyplot as plt
+from matplotlib.patheffects import withStroke
+import seaborn as sns
+import seaborn.objects as so
+from newsuse.data import DataFrame
+from project import config, paths
+
+mpl.style.use(config.plotting.style)
+mpl.rcParams.update({
+    k: v.make() if isinstance(v, Mapping) and "make!" in v else v
+    for k, v in config.plotting.params.items()
+})
+
+# Get default color cycle here and extract colors
+figpath = paths.figures / "glmm" / "total"
+figpath.mkdir(parents=True, exist_ok=True)
+
+SECTORS   = ["non-news", "news"]
+QUALITY   = ["non-news", "low", "medium", "high"]
+COLORS    = mpl.rcParams["axes.prop_cycle"].by_key()["color"]
+ELECTIONS = {k: pd.Timestamp(v) for k, v in config.elections.items()}
+
+LAST_EPOCH = 11
+START_WAR = 5
+END_WAR = 10
+LAST_NONALGO_EPOCH = START_WAR - 1
+```
+
+```{r}
+glmm <- readRDS(as.character(paths$glmm / "both" / "quality.rds"))
+```
+
+```{r}
+dataset <- tibble(glmm$frame)
+```
+
+```{r}
+epochs <- as.character(paths$epochmeta) %>%
+    read_parquet %>%
+    mutate(epoch = 0L:(n() - 1L), .before = 1L)
+
+changepoints <- as.character(paths$changepoints) %>%
+    read_parquet %>%
+    filter(subset == config$changepoints$use)
+```
+
+## Main analysis
+
+```{r}
+obs <- dataset %>%
+    group_by(name, sector, quality, epoch) %>%
+    summarize(n = n(), reactions = mean(reactions)) %>%
+    ungroup
+```
+
+```{r}
+extract_outlet_re <- function(re, term) {
+    parts <- str_split(term, ":", simplify = FALSE)[[1L]]
+    estim <- re[[term]]
+    rdf   <- tibble(term = rownames(estim), estimate = estim[, 1L])
+    for (i in seq_along(parts)) {
+        rdf[[parts[i]]] <- str_split_i(rdf[["term"]], ":", i)
+    }
+    select(rdf, !!!parts, estimate)
+}
+```
+
+```{r}
+re  <- ranef(glmm)
+qdf <- dataset %>%
+    select(name, quality) %>%
+    distinct
+
+re_cond_o <- extract_outlet_re(re$cond, "country:sector:name")
+re_cond_e <- extract_outlet_re(re$cond, "country:sector:name:epoch")
+re_cond <- left_join(
+    rename(re_cond_o, mu_outlet = estimate),
+    rename(re_cond_e, mu_epoch = estimate),
+    by = c("country", "sector", "name")
+) %>%
+    mutate(
+        epoch = as.integer(epoch),
+        mu = mu_outlet + mu_epoch,
+    ) %>%
+    left_join(qdf)
+
+rdf <- re_cond %>%
+    mutate(quality = factor(quality, levels = py$QUALITY)) %>%
+    group_by(quality, epoch) %>%
+    summarize(mu = exp(var(mu)/2)) %>%
+    ungroup %>%
+    arrange(epoch, quality)
+```
+
+```{r}
+rg <- ref_grid(glmm, data = glmm$frame)
+
+# Update regression coefficients in the reference grid
+# so they satisfy:
+# X(b + o) = mu + sigma^2_b / 2
+# This way the estimated marginal means will account for
+# the heterogeneity of the outlet effects.
+# This works because when the link function is log,
+# and random effects are Gaussian, then the distribution
+# of the response accounting for the random effects is log-normal.
+offset <- rg@grid %>%
+    mutate(epoch = as.integer(as.character(epoch))) %>%
+    left_join(rdf) %>%
+    mutate(mu = log(mu)) %>%
+    pull(mu)
+rg@bhat <- rg@bhat + solve(rg@linfct, offset)
+```
+
+```{r}
+# Use 'non-news' as the reference level for 'quality' factor
+rg <- permute_levels(rg, "quality", c(
+    which(rg@levels$quality == "non-news"),
+    which(rg@levels$quality == "low"),
+    which(rg@levels$quality == "medium"),
+    which(rg@levels$quality == "high")
+))
+sectors <- factor(
+    c("non-news", "news", "news", "news"),
+    levels = c("non-news", "news")
+)
+srg <- add_grouping(rg, "sector", "quality", sectors)
+erg <- srg
+```
+
+```{r}
+emm <- emmeans(rg, ~epoch * quality)
+```
+
+```{r}
+## Custom contrasts for comparing against epochs 8 vs 4 and 11 vs 8
+cvec <- function(ai, bi) {
+    vec <- rep(0L, length(emm@levels$epoch))
+    vec[ai] <-  1L
+    vec[bi] <- -1L
+    vec
+}
+C <- rlang::ll(
+    "epoch8 - epoch4" = cvec(9L, 5L),
+    "epoch11 - epoch8" = cvec(12L, 9L),
+)
+
+
+con    <- contrast(emm, method = C, by = "quality")
+con_dd <- contrast(con, method = "trt.vs.ctrl", by = "contrast")
+
+
+.tidy <- function(df, conf.int = TRUE, ...) {
+    tidy(df, conf.int = conf.int, ...)
+}
+
+set.seed(303L)
+
+edf    <- .tidy(emm)
+cdf    <- .tidy(con)
+cdf_dd <- .tidy(con_dd)
+```
+
+## Figure
+
+```{python}
+# Estimated marginal means in epochs 4, 8, and 11
+quality_colorscale = so.Nominal(
+    order=QUALITY,
+    values=[COLORS[3]] + COLORS[:3],
+)
+
+fig, ax = plt.subplots(figsize=(8/2, 3))
+emm = (
+    r.edf
+    .assign(
+        epoch=lambda df: df["epoch"].astype(int),
+    )
+    .query("epoch in [4, 8, 11]")
+)
+
+(
+    so.Plot(emm, x="epoch", y="response", color="quality")
+    .add(
+        so.Line(linewidth=1, linestyle="--"),
+        so.Dodge(),
+        legend=False,
+    )
+    .add(
+        so.Range(linewidth=2, color="black"), so.Dodge(),
+        ymin="conf.low", ymax="conf.high", legend=False,
+    )
+    .add(
+        so.Dot(
+            marker="s",
+            pointsize=8,
+            edgecolor="black",
+            edgewidth=1.5,
+            artist_kws={"zorder": 10},
+        ),
+        so.Dodge(),
+        legend=False,
+    )
+    .scale(color=quality_colorscale)
+    .theme(mpl.rcParams)
+    .on(ax)
+    .plot()
+)
+
+ax.set_xlabel("Epoch", fontsize="large")
+ax.set_ylabel("Reactions per post", fontsize="large")
+ax.set_xticks([4, 8, 11])
+ax.set_yscale("log")
+
+# Custom legend for quality
+handles = [
+    mpl.lines.Line2D(
+        [0], [0], marker="s", color=c, markeredgecolor="black",
+        markeredgewidth=1.5, markersize=6, label=q.title()
+    )
+    for c, q in zip(
+        quality_colorscale.values,
+        quality_colorscale.order,
+        strict=True,
+    )
+]
+fig.legend(
+    handles=handles,
+    ncol=1,
+    loc="center left",
+    bbox_to_anchor=(1, 0.55),
+    fontsize="small",
+    frameon=False,
+    labelspacing=0.8,
+    handletextpad=0.5,
+)
+
+fig.tight_layout()
+fig.savefig(figpath / "emmeans.pdf")
+```
+
+```{python}
+fig, axes = plt.subplots(
+    ncols=2, figsize=(7, 3), sharex=True, sharey=True
+)
+
+ax = axes[0]
+con = r.cdf
+(
+    so.Plot(con, x="contrast", y="ratio", color="quality")
+    .add(
+        so.Line(linewidth=1, linestyle="--"),
+        so.Dodge(),
+        legend=False,
+    )
+    .add(
+        so.Range(linewidth=2, color="black"), so.Dodge(),
+        ymin="conf.low", ymax="conf.high", legend=False,
+    )
+    .add(
+        so.Dot(
+            marker="s",
+            pointsize=8,
+            edgecolor="black",
+            edgewidth=1.5,
+            artist_kws={"zorder": 10},
+        ),
+        so.Dodge(),
+        legend=False,
+    )
+    .scale(color=quality_colorscale)
+    .on(ax)
+    .plot()
+)
+
+ax = axes[1]
+dd = r.cdf_dd
+(
+    so.Plot(dd, x="contrast", y="ratio", color="contrast1")
+    .add(
+        so.Line(linewidth=1, linestyle="--"),
+        so.Dodge(),
+        legend=False,
+    )
+    .add(
+        so.Range(linewidth=2, color="black"), so.Dodge(),
+        ymin="conf.low", ymax="conf.high", legend=False,
+    )
+    .add(
+        so.Dot(
+            marker="s",
+            pointsize=8,
+            edgecolor="black",
+            edgewidth=1.5,
+            artist_kws={"zorder": 10},
+        ),
+        so.Dodge(),
+        legend=False,
+    )
+    .scale(color=so.Nominal(values=COLORS[:3]))
+    .on(ax)
+    .plot()
+)
+
+for ax in axes.flat:
+    ax.set_xlim(-0.75, 1.75)
+    ax.set_xticks([-0.5, 0.5, 1.5], labels=[4, 8, 11])
+    ax.set_yscale("log")
+    ax.set_ylim(10**-1.5, 10**1.5)
+    ax.set_xlabel(None)
+    ax.set_ylabel(None)
+    ax.axhline(1, color="black", linestyle=":", linewidth=1)
+
+axes[0].set_ylabel("Ratio of means", fontsize="large")
+axes[0].set_title(
+    "Total effects (maximum relative change)",
+    fontsize="medium"
+)
+axes[1].set_title("Causal effects (news / non-news)", fontsize="medium")
+
+# Draw arrows connecting adjacent xtick labels
+for ax in axes:
+    for i in range(len(ax.get_xticks()) - 1):
+        ax.annotate(
+            "",
+            xy=(ax.get_xticks()[i] + 0.1, 10**-1.75),
+            xytext=(ax.get_xticks()[i + 1] - 0.1, 10**-1.75),
+            arrowprops=dict(arrowstyle="<-", color="black"),
+            annotation_clip=False,
+        )
+
+fig.supxlabel(
+    "Transition between epochs",
+    fontsize="large",
+    x=0.55,
+    y=.05,
+)
+fig.tight_layout()
+fig.savefig(figpath / "effects.pdf")
+```
+
+## Tables
+
+### Estimated marginal means and contrasts
+
+```{python}
+bounds = (
+    r.epochs
+    .assign(
+        start=lambda df: df["start"].dt.strftime("%y.%m.%d"),
+        end=lambda df: df["end"].dt.strftime("%y.%m.%d"),
+        period=lambda df: (
+            df["start"] + "-" + df["end"]
+        ),
+    )
+    [["epoch", "period"]]
+)
+emm = (
+    pd.concat([r.edf], axis=0, ignore_index=True)
+    .assign(
+        epoch=lambda df: df["epoch"].astype(int),
+        sector=lambda df: pd.Categorical(
+            df["quality"],
+            categories=QUALITY,
+        )
+    )
+    .merge(bounds)
+    .set_index(["epoch", "period", "quality"])
+    .sort_index(level=["epoch"])
+    .pipe(
+        lambda df: (
+            DataFrame({
+                "mean": df["response"],
+                f"[{r.alpha/2:.1%}": df["conf.low"],
+                f"{r.conf+r.alpha/2:.1%}]": df["conf.high"],
+            }, index=df.index)
+        )
+    )
+)
+contrast = (
+    pd.concat([r.cdf])
+    .set_index(["contrast", "quality"])
+    .pipe(
+        lambda df: DataFrame({
+            "ratio": df["ratio"],
+            f"[{r.alpha/2:.1%}": df["conf.low"],
+            f"{r.conf+r.alpha/2:.1%}]": df["conf.high"],
+            "z": df["statistic"],
+            "p": df["adj.p.value"],
+        }, df.index)
+    )
+    .loc[["epoch8 / epoch4", "epoch11 / epoch8"]]
+)
+causal = (
+    pd.concat([r.cdf_dd])
+    .assign(
+        quality=lambda df: (
+            df["contrast1"].str.extract(r"^([^/]+)")[0].str.strip()
+        )
+    )
+    .set_index(["contrast", "quality"])
+    .pipe(
+        lambda df: DataFrame({
+            "ratio": df["ratio"],
+            f"[{r.alpha/2:.1%}": df["conf.low"],
+            f"{r.conf+r.alpha/2:.1%}]": df["conf.high"],
+            "z": df["statistic"],
+            "p": df["adj.p.value"],
+        }, df.index)
+    )
+    .loc[["epoch8 / epoch4", "epoch11 / epoch8"]]
+)
+table = (
+    pd.concat({
+        "Total effects": contrast,
+        "Causal effects": causal,
+    }, axis=1)
+    .reset_index()
+    .set_index(["contrast", "quality"])
+)
+num_cols = [c != "p" for c in table.columns.get_level_values(1)]
+pv_cols = [c == "p" for c in table.columns.get_level_values(1)]
+
+(
+    table
+    .style
+    .format(
+        "{:.2f}", subset=pd.IndexSlice[:, num_cols],
+        na_rep="-", escape="latex",
+    )
+    .format(
+        "{:.3f}", subset=pd.IndexSlice[:, pv_cols],
+        na_rep="-", escape="latex",
+    )
+    .pipe(lambda df: print(
+        df.to_latex(
+            hrules=True,
+            multicol_align="c",
+            multirow_align="t",
+            position="htb!",
+        )
+    ))
+)
+```
