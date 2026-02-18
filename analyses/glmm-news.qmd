@@ -89,12 +89,6 @@ ELECTIONS = {k: pd.Timestamp(v) for k, v in config.elections.items()}
 ```
 
 ```{r}
-dataset <- as.character(paths$dataset) %>%
-    read_parquet %>%
-    left_join(read_parquet(as.character(paths$epochs)))
-```
-
-```{r}
 epochs <- as.character(paths$epochmeta) %>%
     read_parquet %>%
     mutate(epoch = 0L:(n() - 1L), .before = 1L)
@@ -115,11 +109,14 @@ glmm <- readRDS(
 ```
 
 ```{r}
+dataset <- tibble(glmm$frame)
+```
+
+```{r}
 obs <- dataset %>%
     group_by(name, quality, epoch) %>%
     summarize(n = n(), reactions = mean(reactions)) %>%
-    ungroup %>%
-    left_join(epochs)
+    ungroup
 ```
 
 ```{r}
@@ -219,8 +216,15 @@ cdf_qe  <- .tidy(con_qe)
 fig, ax = plt.subplots(figsize=(7.5, 3))
 
 # Outlet-epoch averages ============================
+data = (
+    r.obs
+    .assign(
+        epoch=lambda df: df["epoch"].astype(int),
+    )
+    .merge(r.epochs, on="epoch")
+)
 (
-    so.Plot(r.obs, x="mid", y="reactions", color="quality")
+    so.Plot(data, x="mid", y="reactions", color="quality")
     .add(
         so.Dots(), so.Jitter(x=14, seed=17), so.Dodge(),
         pointsize="n", legend=False
@@ -819,6 +823,40 @@ ax.xaxis.set_major_locator(mpl.dates.YearLocator())
 
 fig.tight_layout()
 fig.savefig(figpath / "news-quality-contrast.pdf")
+```
+
+```{python}
+fig, axes = plt.subplots(
+    figsize=(7.5, 1),
+    ncols=2,
+    gridspec_kw={"width_ratios": [0.05, 0.95]},
+)
+
+axes[0].axis("off")
+
+ax = axes[1]
+xticks = epochs["start"]
+for ts in xticks[1:]:
+    ax.axvline(ts, ls=":", color="k", lw=.5)
+for _, row in epochs.iterrows():
+    ax.annotate(
+        row["epoch"], (row["mid"], 0.5), ha="center", va="center", fontsize=12, color="black",
+        path_effects=[withStroke(foreground="white", linewidth=2)],
+    )
+
+ax.set_xlim(epochs["start"].min(), epochs["end"].max())
+ax.set_ylim(0, 1)
+
+ax.yaxis.set_visible(False)
+ax.spines.top.set_visible(False)
+ax.spines.right.set_visible(False)
+ax.spines.left.set_visible(False)
+ax.set_title("Epochs")
+ax.xaxis.set_major_locator(mpl.dates.YearLocator())
+ax.tick_params(labelsize=8)
+
+fig.tight_layout()
+fig.savefig(figpath / "epochs-timeline.pdf")
 ```
 
 ## Tables
