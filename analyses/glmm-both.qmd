@@ -456,6 +456,7 @@ for idx, row in sdata.iterrows():
 
 
 # Final touches ===========================================
+ax.xaxis.set_major_locator(mpl.dates.YearLocator())
 ax.set_yscale("log")
 ax.set_ylim(top=10**5.1)
 ax.set_xlabel(None)
@@ -640,6 +641,7 @@ ax.set_ylim(10**-1.5, 10**1)
 
 ax.set_xlabel(None)
 ax.set_ylabel("News / Non-news")
+ax.xaxis.set_major_locator(mpl.dates.YearLocator())
 ax.tick_params(labelsize=8)
 
 for ts in r.changepoints["timestamp"]:

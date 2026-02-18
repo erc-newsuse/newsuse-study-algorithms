@@ -484,6 +484,7 @@ other_legend = fig.legend(
 
 # Final touches ==========================================
 
+ax.xaxis.set_major_locator(mpl.dates.YearLocator())
 ax.tick_params(labelsize=8)
 
 # Add elections
@@ -668,6 +669,7 @@ legend_seq = fig.legend(
 # for ts in ELECTIONS.values():
 #     ax.axvline(ts, color="gold", lw=2.5, zorder=0)
 #     ax.axvline(ts, color="black", lw=.25, zorder=1)
+ax.xaxis.set_major_locator(mpl.dates.YearLocator())
 
 fig.tight_layout()
 fig.savefig(figpath / "news-contrast.pdf")
@@ -812,6 +814,8 @@ legend = fig.legend(
     fontsize=8,
     bbox_to_anchor=(.5, -.02),
 )
+
+ax.xaxis.set_major_locator(mpl.dates.YearLocator())
 
 fig.tight_layout()
 fig.savefig(figpath / "news-quality-contrast.pdf")
