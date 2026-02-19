@@ -195,26 +195,13 @@ erg <- srg
 ```
 
 ```{r}
-emm <- emmeans(rg, ~epoch * quality)
-```
-
-```{r}
-## Custom contrasts for comparing against epochs 8 vs 4 and 11 vs 8
-cvec <- function(ai, bi) {
-    vec <- rep(0L, length(emm@levels$epoch))
-    vec[ai] <-  1L
-    vec[bi] <- -1L
-    vec
-}
-C <- rlang::ll(
-    "epoch8 - epoch4" = cvec(9L, 5L),
-    "epoch11 - epoch8" = cvec(12L, 9L),
-)
-
-
-con    <- contrast(emm, method = C, by = "quality")
-con_dd <- contrast(con, method = "trt.vs.ctrl", by = "contrast")
-
+rg       <- subset(srg, epoch %in% c(4L, 8L, 11L))
+emm      <- emmeans(rg, ~epoch * quality)
+emm_s    <- emmeans(rg, ~epoch * sector)
+con      <- contrast(emm, method = "consec", by = "quality")
+con_s    <- contrast(emm_s, method = "consec", by = "sector")
+con_dd   <- contrast(con, method = "trt.vs.ctrl", by = "contrast", adjust = "mvt")
+con_dd_s <- contrast(con_s, method = "trt.vs.ctrl", by = "contrast", adjust = "mvt")
 
 .tidy <- function(df, conf.int = TRUE, ...) {
     tidy(df, conf.int = conf.int, ...)
@@ -222,9 +209,11 @@ con_dd <- contrast(con, method = "trt.vs.ctrl", by = "contrast")
 
 set.seed(303L)
 
-edf    <- .tidy(emm)
-cdf    <- .tidy(con)
-cdf_dd <- .tidy(con_dd)
+edf      <- .tidy(emm)
+cdf      <- .tidy(con)
+cdf_s    <- .tidy(con_s)
+cdf_dd   <- .tidy(con_dd)
+cdf_dd_s <- .tidy(con_dd_s)
 ```
 
 ## Figure
@@ -314,11 +303,11 @@ ax = axes[0]
 con = r.cdf
 (
     so.Plot(con, x="contrast", y="ratio", color="quality")
-    .add(
-        so.Line(linewidth=1, linestyle="--"),
-        so.Dodge(),
-        legend=False,
-    )
+    # .add(
+    #     so.Line(linewidth=1, linestyle="--"),
+    #     so.Dodge(),
+    #     legend=False,
+    # )
     .add(
         so.Range(linewidth=2, color="black"), so.Dodge(),
         ymin="conf.low", ymax="conf.high", legend=False,
@@ -343,11 +332,11 @@ ax = axes[1]
 dd = r.cdf_dd
 (
     so.Plot(dd, x="contrast", y="ratio", color="contrast1")
-    .add(
-        so.Line(linewidth=1, linestyle="--"),
-        so.Dodge(),
-        legend=False,
-    )
+    # .add(
+    #     so.Line(linewidth=1, linestyle="--"),
+    #     so.Dodge(),
+    #     legend=False,
+    # )
     .add(
         so.Range(linewidth=2, color="black"), so.Dodge(),
         ymin="conf.low", ymax="conf.high", legend=False,
@@ -444,8 +433,13 @@ emm = (
     )
 )
 contrast = (
-    pd.concat([r.cdf])
-    .set_index(["contrast", "quality"])
+    pd.concat(
+        [
+            r.cdf.drop(columns="sector").rename(columns={"quality": "sector"}),
+            r.cdf_s.query("sector == 'news'")
+        ]
+    )
+    .set_index(["sector", "contrast"])
     .pipe(
         lambda df: DataFrame({
             "ratio": df["ratio"],
@@ -455,16 +449,23 @@ contrast = (
             "p": df["adj.p.value"],
         }, df.index)
     )
+    .loc[["non-news", "news", "low", "medium", "high"]]
+    .swaplevel(0, 1)
     .loc[["epoch8 / epoch4", "epoch11 / epoch8"]]
 )
 causal = (
-    pd.concat([r.cdf_dd])
+    pd.concat(
+        [
+            r.cdf_dd,
+            r.cdf_dd_s.rename(columns={"p.value": "adj.p.value"})
+        ]
+    )
     .assign(
-        quality=lambda df: (
-            df["contrast1"].str.extract(r"^([^/]+)")[0].str.strip()
+        sector=lambda df: (
+            df["contrast1"].str.extract(r"^([^\s]+)")[0].str.strip()
         )
     )
-    .set_index(["contrast", "quality"])
+    .set_index(["sector", "contrast"])
     .pipe(
         lambda df: DataFrame({
             "ratio": df["ratio"],
@@ -474,6 +475,8 @@ causal = (
             "p": df["adj.p.value"],
         }, df.index)
     )
+    .loc[["news", "low", "medium", "high"]]
+    .swaplevel(0, 1)
     .loc[["epoch8 / epoch4", "epoch11 / epoch8"]]
 )
 table = (
@@ -482,7 +485,7 @@ table = (
         "Causal effects": causal,
     }, axis=1)
     .reset_index()
-    .set_index(["contrast", "quality"])
+    .set_index(["contrast", "sector"])
 )
 num_cols = [c != "p" for c in table.columns.get_level_values(1)]
 pv_cols = [c == "p" for c in table.columns.get_level_values(1)]
