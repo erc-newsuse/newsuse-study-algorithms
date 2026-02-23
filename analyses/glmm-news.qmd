@@ -119,6 +119,16 @@ obs <- dataset %>%
     ungroup
 ```
 
+```{python}
+(
+    r.obs
+    .set_index(["quality", "name", "epoch"])
+    .pipe(DataFrame)
+    .sort_index()
+    .to_(paths.proc / "outlets-emm.xlsx")
+)
+```
+
 ```{r}
 extract_outlet_re <- function(re, term) {
     parts <- str_split(term, ":", simplify = FALSE)[[1L]]
