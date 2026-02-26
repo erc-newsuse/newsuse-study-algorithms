@@ -120,20 +120,28 @@ data = (
 ```
 
 ```{python}
-events = pd.concat(
-    [
-        DataFrame(
-            {
-                "Changepoint": ["Cov"],
-                "Timestamp": [COVID_US],
-                "Description": ["1st Covid case in the U.S."],
-            }
-        ),
-        DataFrame.from_(paths.events)
-        .set_index(["Changepoint", "Event"])
-        .loc[[(5, "b"), (7, "a"), (7, "b"), (9, "a"), (9, "b"), (11, "a")]]
-        .reset_index(drop=False),
-    ]
+events = (
+    pd.concat(
+        [
+            DataFrame(
+                {
+                    "Changepoint": ["Cov"],
+                    "timestamp": [COVID_US],
+                    "Description": ["1st Covid case in the U.S."],
+                }
+            ),
+            DataFrame.from_(paths.events)
+            .set_index(["Changepoint", "Event"])
+            # .loc[[(5, "b"), (7, "a"), (7, "b"), (9, "a"), (9, "b"), (11, "a")]]
+            .loc[[(5, "b"), (7, "a"), (9, "a"), (8, "a"), (10, "a")]]
+            .reset_index(drop=False),
+        ]
+    )
+    .rename(columns=str.lower)
+    .rename(columns=str.capitalize)
+    .assign(
+        Timestamp=lambda df: pd.to_datetime(df["Timestamp"]).dt.date
+    )
 )
 ```
 
