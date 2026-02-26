@@ -216,7 +216,7 @@ cdf_dd   <- .tidy(con_dd)
 cdf_dd_s <- .tidy(con_dd_s)
 ```
 
-## Figure
+### Figure
 
 ```{python}
 # Estimated marginal means in epochs 4, 8, and 11
@@ -394,6 +394,30 @@ fig.tight_layout()
 fig.savefig(figpath / "effects.pdf")
 ```
 
+## Epoch 11 vs 4
+
+```{r}
+rg2       <- subset(srg, epoch %in% c(4L, 11L))
+emm2      <- emmeans(rg2, ~epoch * quality)
+emm2_s    <- emmeans(rg2, ~epoch * sector)
+con2      <- contrast(emm2, method = "consec", by = "quality")
+con2_s    <- contrast(emm2_s, method = "consec", by = "sector")
+con2_dd   <- contrast(con2, method = "trt.vs.ctrl", by = "contrast", adjust = "mvt")
+con2_dd_s <- contrast(con2_s, method = "trt.vs.ctrl", by = "contrast", adjust = "mvt")
+
+.tidy <- function(df, conf.int = TRUE, ...) {
+    tidy(df, conf.int = conf.int, ...)
+}
+
+set.seed(304L)
+
+edf2      <- .tidy(emm2)
+cdf2      <- .tidy(con2)
+cdf2_s    <- .tidy(con2_s)
+cdf2_dd   <- .tidy(con2_dd)
+cdf2_dd_s <- .tidy(con2_dd_s)
+```
+
 ## Tables
 
 ### Estimated marginal means and contrasts
@@ -435,8 +459,12 @@ emm = (
 contrast = (
     pd.concat(
         [
-            r.cdf.drop(columns="sector").rename(columns={"quality": "sector"}),
+            r.cdf.drop(columns="sector")
+            .rename(columns={"quality": "sector", "adj.p.value": "p.value"}),
             r.cdf_s.query("sector == 'news'")
+            .rename(columns={"adj.p.value": "p.value"}),
+            r.cdf2.drop(columns="sector").rename(columns={"quality": "sector"}),
+            r.cdf2_s.query("sector == 'news'"),
         ]
     )
     .set_index(["sector", "contrast"])
@@ -446,18 +474,20 @@ contrast = (
             f"[{r.alpha/2:.1%}": df["conf.low"],
             f"{r.conf+r.alpha/2:.1%}]": df["conf.high"],
             "z": df["statistic"],
-            "p": df["adj.p.value"],
+            "p": df["p.value"],
         }, df.index)
     )
     .loc[["non-news", "news", "low", "medium", "high"]]
     .swaplevel(0, 1)
-    .loc[["epoch8 / epoch4", "epoch11 / epoch8"]]
+    .loc[["epoch8 / epoch4", "epoch11 / epoch8", "epoch11 / epoch4"]]
 )
 causal = (
     pd.concat(
         [
-            r.cdf_dd,
-            r.cdf_dd_s.rename(columns={"p.value": "adj.p.value"})
+            r.cdf_dd.rename(columns={"adj.p.value": "p.value"}),
+            r.cdf_dd_s,
+            r.cdf2_dd.rename(columns={"adj.p.value": "p.value"}),
+            r.cdf2_dd_s,
         ]
     )
     .assign(
@@ -472,12 +502,12 @@ causal = (
             f"[{r.alpha/2:.1%}": df["conf.low"],
             f"{r.conf+r.alpha/2:.1%}]": df["conf.high"],
             "z": df["statistic"],
-            "p": df["adj.p.value"],
+            "p": df["p.value"],
         }, df.index)
     )
     .loc[["news", "low", "medium", "high"]]
     .swaplevel(0, 1)
-    .loc[["epoch8 / epoch4", "epoch11 / epoch8"]]
+    .loc[["epoch8 / epoch4", "epoch11 / epoch8", "epoch11 / epoch4"]]
 )
 table = (
     pd.concat({
