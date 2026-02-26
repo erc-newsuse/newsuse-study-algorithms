@@ -1,0 +1,64 @@
+---
+title: "Generalized linear mixed model"
+subtitle: "outlet-specific effects"
+author: "Szymon Talaga"
+date: last-modified
+date-format: "MMMM D, YYYY | HH:mm:ss (Z)"
+toc: true
+toc-depth: 3
+toc-location: left
+execute:
+  echo: false
+  warning: false
+  cache: false
+  daemon: false
+format:
+  html:
+    grid:
+      margin-width: 350px
+    embed-resources: true
+  pdf:
+    toc: false
+    number-sections: true
+    colorlinks: true
+reference-location: margin
+citation-location: margin
+---
+
+```{python}
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from project import paths
+from newsuse.data import DataFrame
+```
+
+```{python}
+emm = DataFrame.from_(paths.proc / "outlets-emm.xlsx").ffill()
+e11e4 = (
+    emm.pipe(
+        lambda df: df[
+            df["name"].isin(
+                df.groupby("name")["epoch"].nunique()
+                .pipe(lambda s: s[s >= 12].index)
+            )
+        ]
+    )
+    .set_index(["epoch", "quality", "name"])["reactions"]
+    .groupby(["quality", "name"])
+    .apply(lambda s: s[11] / s[4])
+    .reset_index(level=(0, 1), drop=True)
+)
+```
+
+```{python}
+x = (
+    emm.set_index(["epoch", "quality", "name"])["reactions"]
+    .xs("the new republic", level="name")
+    .droplevel("quality")
+)
+
+fig, ax = plt.subplots()
+ax.plot(x.index, x)
+ax.set_yscale("log")
+```
