@@ -119,16 +119,6 @@ obs <- dataset %>%
     ungroup
 ```
 
-```{python}
-(
-    r.obs
-    .set_index(["quality", "name", "epoch"])
-    .pipe(DataFrame)
-    .sort_index()
-    .to_(paths.proc / "outlets-emm.xlsx")
-)
-```
-
 ```{r}
 extract_outlet_re <- function(re, term) {
     parts <- str_split(term, ":", simplify = FALSE)[[1L]]
@@ -168,6 +158,31 @@ rdf <- re_cond %>%
     summarize(mu = exp(var(mu)/2)) %>%
     ungroup %>%
     arrange(epoch, quality)
+```
+
+```{python}
+links = (
+    DataFrame.from_(paths.dataset, columns=["key", "name", "quality", "type"])
+    .merge(DataFrame.from_(paths.epochs))
+    .groupby(["name", "quality", "epoch"])["type"]
+    .value_counts(normalize=True)
+    .sort_index()
+    .unstack(-1, fill_value=0.0)
+    ["link"]
+    .reset_index()
+)
+```
+
+```{python}
+(
+    r.obs.assign(epoch=lambda df: df["epoch"].astype(int))
+    .merge(r.re_cond[["quality", "name", "epoch", "mu_epoch"]])
+    .merge(links)
+    .set_index(["quality", "name", "epoch"])
+    .pipe(DataFrame)
+    .sort_index()
+    .to_(paths.proc / "outlets-emm-news.xlsx")
+)
 ```
 
 ```{r}

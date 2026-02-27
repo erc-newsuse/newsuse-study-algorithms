@@ -1,4 +1,4 @@
-/outlets-emm.xlsx
+/outlets-emm*.xlsx
 /counts.parquet
 /dataset.parquet
 /timeseries.parquet

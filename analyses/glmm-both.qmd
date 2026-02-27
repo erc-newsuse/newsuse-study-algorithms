@@ -159,6 +159,41 @@ rdf <- re_cond %>%
     arrange(epoch, quality)
 ```
 
+```{python}
+links = (
+    DataFrame.from_(paths.nonnews, columns=["key", "name", "type"])
+    .assign(sector="non-news")
+    .merge(DataFrame.from_(paths.epochs))
+    .groupby(["name", "sector", "epoch"])["type"]
+    .value_counts(normalize=True)
+    .sort_index()
+    .unstack(-1, fill_value=0.0)
+    ["link"]
+    .reset_index()
+    .assign(
+        name=lambda df: df["name"].astype(str),
+        epoch=lambda df: df["epoch"].astype(int),
+        sector=lambda df: df["sector"].astype(str)
+    )
+)
+```
+
+```{python}
+(
+    r.obs.assign(
+        name=lambda df: df["name"].astype(str),
+        epoch=lambda df: df["epoch"].astype(int),
+        sector=lambda df: df["sector"].astype(str)
+    )
+    .merge(r.re_cond[["sector", "name", "epoch", "mu_epoch"]])
+    .merge(links)
+    .set_index(["sector", "name", "epoch"])
+    .pipe(DataFrame)
+    .sort_index()
+    .to_(paths.proc / "outlets-emm-non-news.xlsx")
+)
+```
+
 ```{r}
 rg <- ref_grid(glmm, data = glmm$frame)
 
