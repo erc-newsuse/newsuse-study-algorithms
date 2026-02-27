@@ -86,6 +86,11 @@ glmm_b <- readRDS(as.character(paths$glmm / "both" / "quality.rds"))
 ```
 
 ```{r}
+# Custom S3 method extending broom.mixed::tidy.glmmTMB to also extract
+# the dispersion component's fixed effects and variance components, which
+# the default method omits. This is necessary because glmmTMB models
+# separate conditional (mean) and dispersion sub-models, and publication
+# tables need both.
 tidy.glmmTMB <- function(mod, component = c("cond", "disp", "zi"), ...) {
     is_disp <- "disp" %in% component
     if (is_disp) component <- component[-which(component == "disp")]
@@ -142,6 +147,10 @@ Tb <- tidy(glmm_b)
 ```
 
 ```{python}
+# Convert R formula notation (e.g., "qualitylow:epoch5", "(Intercept)")
+# into human-readable, LaTeX-compatible labels for publication model tables.
+# Interaction terms are formatted with multiplication signs, factor levels
+# are extracted from prefixed names (e.g., "qualitylow" -> "low").
 def sanitize_term(term, ref=list(QUALITY)[0]):
     def sanitize(t: str):
         if  t.startswith((prefix := "quality")):

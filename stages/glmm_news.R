@@ -64,6 +64,12 @@ get_control <- function(
 
 # %% Make formula --------------------------------------------------------------------
 
+# Core research question: quality x epoch interaction tests whether the effect of
+# Meta's algorithmic changes (captured by epochs) differs across news quality tiers.
+# Random intercepts for outlet nested within country account for outlet-level baselines;
+# outlet x epoch random interaction captures outlet-specific responses to algorithmic
+# changes. Dispersion sub-model with quality x epoch allows variance heterogeneity
+# across quality-epoch combinations.
 frm     <- reactions ~ 1 + quality * epoch +
     (1 | country:name) + (1 | country:name:epoch) +
     (1 + quality | year:month:day)
@@ -86,6 +92,10 @@ time <- system.time(
         ziformula = ~0,
         # ziformula = zifrm,
         # family = truncated_nbinom2,
+        # nbinom1 (linear variance: Var = mu(1+alpha)) is used instead of nbinom2 because
+        # with the epoch-level model structure, nbinom1 provided better convergence and fit.
+        # The choice between nbinom1 and nbinom2 is empirical -- both handle overdispersion
+        # but differ in how variance scales with the mean.
         family = nbinom1,
         control = control
     )

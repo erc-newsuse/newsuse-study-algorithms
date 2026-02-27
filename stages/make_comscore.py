@@ -1,3 +1,8 @@
+"""DVC stage 'comscore'. Processes ComScore audience measurement data: reads raw
+panel data, imputes missing monthly values using bounded forward/backward fill,
+and filters to outlets present in the news dataset.
+Output: data/proc/comscore.parquet.
+"""
 # %% ---------------------------------------------------------------------------------
 
 import pandas as pd
@@ -48,6 +53,10 @@ comscore = (
     .drop(columns="delta")
     .set_index(["date"])
     .groupby("name")
+    # ComScore panel data has sporadic missing months; bounded ffill/bfill
+    # (limit from params) interpolates short gaps while avoiding extrapolation
+    # over long periods of genuinely missing coverage. Outlets not present
+    # in the news dataset are dropped.
     .apply(
         lambda s: (
             s.ffill(limit=config.comscore.imputation.limit).bfill(

@@ -1,3 +1,8 @@
+"""DVC stage 'signal'. Constructs country-level engagement signals from weekly
+outlet data by averaging log-transformed metrics across outlets within each
+country. The log transform stabilizes variance across outlets with very
+different scales. Output: data/proc/signal.parquet.
+"""
 # %% ---------------------------------------------------------------------------------
 
 import numpy as np
@@ -30,6 +35,8 @@ signal = (
     .reset_index(drop=True)
 )
 
+# Fractional-year time variable (weeks since start / 52) is required by the
+# BEAST changepoint detection algorithm, which expects time in yearly units.
 signal.insert(
     signal.columns.get_loc("timestamp") + 1,
     "time",

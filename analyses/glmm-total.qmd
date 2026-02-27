@@ -195,11 +195,19 @@ erg <- srg
 ```
 
 ```{r}
+# Select three key epochs to capture the trajectory of algorithmic impact:
+# - Epoch 4: pre-"war on news" baseline (before Meta began reducing news distribution)
+# - Epoch 8: mid-treatment (during active algorithmic suppression of news)
+# - Epoch 11: final observed period
 rg       <- subset(srg, epoch %in% c(4L, 8L, 11L))
 emm      <- emmeans(rg, ~epoch * quality)
 emm_s    <- emmeans(rg, ~epoch * sector)
 con      <- contrast(emm, method = "consec", by = "quality")
 con_s    <- contrast(emm_s, method = "consec", by = "sector")
+# Difference-in-differences contrasts: the sequential changes in news engagement
+# (epoch 4->8, 8->11) are compared against corresponding changes in non-news
+# engagement to isolate effects attributable to news-specific algorithmic
+# changes rather than platform-wide trends.
 con_dd   <- contrast(con, method = "trt.vs.ctrl", by = "contrast", adjust = "mvt")
 con_dd_s <- contrast(con_s, method = "trt.vs.ctrl", by = "contrast", adjust = "mvt")
 

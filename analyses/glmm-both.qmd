@@ -47,6 +47,15 @@ alpha     <- config$inference$alpha
 conf      <- config$inference$conf
 adjust    <- config$inference$adjust
 
+# Configure emmeans globally:
+# - type="response": report estimated marginal means on the natural (response)
+#   scale rather than the link (log) scale, so results are directly interpretable
+#   as expected reaction counts.
+# - adjust="mvt": use the multivariate t distribution for multiple comparison
+#   correction, which is more powerful than Bonferroni because it accounts for
+#   correlations among contrasts.
+# - infer=TRUE: include confidence intervals and p-values in all summaries
+#   by default, avoiding the need to request them in every emmeans call.
 emm_options(
     emmeans  = list(type = "response", level = conf, adjust = adjust),
     contrast = list(adjust = adjust),
@@ -214,6 +223,11 @@ rg@bhat <- rg@bhat + solve(rg@linfct, offset)
 ```
 
 ```{r}
+# Create a virtual "sector" grouping dimension by mapping quality levels
+# to news/non-news sectors. This allows emmeans to compute sector-level
+# marginal means and news-vs-non-news contrasts from the quality-level
+# model without needing to refit -- a key technique for the
+# difference-in-differences analysis.
 # Use 'non-news' as the reference level for 'quality' factor
 rg <- permute_levels(rg, "quality", c(
     which(rg@levels$quality == "non-news"),
@@ -752,6 +766,11 @@ fig.savefig(figpath / "both-contrasts.pdf")
 ### Parallel trends analysis (or multiplicative equiproportionality)
 
 ```{r}
+# Test the parallel trends assumption required for DiD validity:
+# Under the null of parallel (equiproportional) trends, the news/non-news
+# ratio of means should be constant across pre-treatment epochs. The Wald
+# chi-square test checks whether DiD estimates for pre-treatment period
+# transitions are jointly zero. Failure to reject supports DiD validity.
 ptemm <- emmeans(srg, ~epoch * sector, type = "link")
 ptcon <- contrast(ptemm, interaction = c("consec", "consec"))
 ptcdf <- .tidy(ptcon)

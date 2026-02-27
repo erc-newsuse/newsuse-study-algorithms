@@ -26,6 +26,8 @@ citation-location: margin
 ---
 
 ```{python}
+# Visualize detected changepoints in the relative mean and dispersion signals
+# of news engagement, overlaid with algorithmic and political events.
 import importlib
 from typing import Mapping
 import datetime

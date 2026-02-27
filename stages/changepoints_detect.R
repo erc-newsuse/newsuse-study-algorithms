@@ -31,6 +31,12 @@ parse_env <- function(env) {
     set_names(map(nm, ~env[[.x]]), nm)
 }
 
+# BEAST algorithm configuration:
+# - metadata: irregular time spacing, no seasonality, weekly resolution as fraction
+#   of year, with outlier detection enabled
+# - prior: constrains trend complexity to piecewise linear (order 0-1), up to 30 knots
+#   with minimum 13-week separation to prevent detecting spurious short-term
+#   fluctuations as structural breaks
 metadata <- rlang::ll(time = time, !!!parse_env(config$changepoints$beast$metadata))
 prior    <- rlang::ll(!!!parse_env(config$changepoints$beast$prior))
 mcmc     <- rlang::ll()
@@ -45,6 +51,10 @@ results <- lmap(subsets, ~rlang::ll(!!.x := list()))
 
 # %% ---------------------------------------------------------------------------------
 
+# Robustness strategy: running BEAST N times (default 1000) with independent random
+# seeds produces a distribution of changepoint probabilities. Aggregating across
+# runs yields stable, reproducible changepoint estimates that are robust to the
+# algorithm's internal stochastic MCMC sampling.
 for (subset in subsets) {
     env  <- config$changepoints$subsets[[subset]]
     cols <- map_chr(0L:(length(env) - 1L), ~env[[.x]])

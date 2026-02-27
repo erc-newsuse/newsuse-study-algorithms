@@ -1,3 +1,9 @@
+"""DVC stage 'news'. Processes raw Facebook news post data: reads Sotrender
+exports, generates deterministic post keys (hash-based), merges imputed
+reaction counts, appends 2025 data with forward-filled metadata.
+Inputs: raw news parquet, metadata, imputed reactions, 2025 data.
+Outputs: data/proc/news.parquet, data/proc/counts.parquet.
+"""
 # %% ---------------------------------------------------------------------------------
 
 from datetime import date
@@ -41,6 +47,11 @@ data = (
     .reset_index(drop=True)
     .merge(imputed, how="left", on="key")
     .assign(key=lambda df: df["fb_post_id"].str.strip())
+    # Keys are constructed as `sotrender@{hash}` where hash is a deterministic
+    # joblib hash of (name, timestamp, type). The `sotrender@` prefix distinguishes
+    # synthetic keys from original Sotrender IDs. Posts with NA-based IDs include
+    # the 'check' field in the hash input to avoid collisions. NaN values are
+    # replaced with sentinel strings by joblib to ensure hash stability.
     .assign(
         key=lambda df: "sotrender@"
         + np.where(
@@ -65,6 +76,8 @@ data = (
     .reset_index(drop=True)
     .merge(metadata, on="name", how="left")
     .rename(columns={"likes": "reactions"})
+    # `combine_first` gives priority to original non-null values, falling back
+    # to imputed values only where the original is missing.
     .assign(
         reactions=lambda df: (
             df[config.imputation.source]
@@ -79,6 +92,10 @@ assert data["key"].is_unique
 
 # %% Add 2025 data ----------------------------------------------------------------
 
+# 2025 data lacks metadata columns present in the main dataset; forward-fill
+# (ffill) propagates the last known metadata values per outlet, which is valid
+# because outlet-level metadata (quality, ideology, followers) changes
+# infrequently.
 with pd.option_context("future.no_silent_downcasting", True):
     data = (
         pd.concat(

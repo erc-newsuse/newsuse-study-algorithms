@@ -25,6 +25,8 @@ citation-location: margin
 ---
 
 ```{python}
+# Descriptive statistics and distributional plots for the processed dataset.
+# Python-only notebook -- no R/emmeans statistical inference.
 import importlib
 from typing import Mapping
 import datetime

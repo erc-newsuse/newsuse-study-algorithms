@@ -1,3 +1,9 @@
+"""DVC stage 'timeseries'. Creates a dense, contiguous weekly time series by
+computing a full cross-product of (outlet x week) and filling gaps via
+interpolation. This guarantees every outlet has an observation for every week
+in the study period, which is required for time series modeling.
+Output: data/proc/timeseries.parquet.
+"""
 # %% ---------------------------------------------------------------------------------
 
 import numpy as np
@@ -28,6 +34,10 @@ weekly = weekly[[*KEYCOLS, *TIMECOLS, *SIGNALCOLS]]
 
 # %% ---------------------------------------------------------------------------------
 
+# Sparse-to-dense strategy: real-world posting data has gaps (outlets skip weeks);
+# the cross-product of all outlets x all weeks creates the complete grid, and
+# missing values are then interpolated to ensure contiguous series for
+# downstream AR(1) models.
 accounts = weekly[KEYCOLS].drop_duplicates(ignore_index=True)
 timegrid = (
     weekly[["timestamp"]]

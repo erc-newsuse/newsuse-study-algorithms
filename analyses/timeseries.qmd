@@ -145,6 +145,13 @@ data <- py$weekly %>%
 ```
 
 ```{r}
+# Two-model comparison strategy for temporal dependence:
+# - glmm_lm: standard log-linear regression assuming independent observations
+# - glmm_ts: adds AR(1) temporal autocorrelation via ar1(ftime + 0 | group),
+#   modeling first-order autoregressive correlation in residuals within each
+#   quality x country group.
+# Comparing via ANOVA/likelihood ratio test determines whether weekly
+# observations exhibit significant temporal dependence.
 glmm_lm <- glmmTMB(
     log(reactions) ~ 1 +
         quality * log(n_posts),
@@ -156,6 +163,11 @@ glmm_ts <- update(glmm_lm, . ~ . + ar1(ftime + 0 | group))
 ```
 
 ```{r}
+# Derive the implied model-based correlation between log(reactions) and
+# log(n_posts) -- i.e., the relationship between engagement intensity and
+# posting volume. Low correlations indicate that engagement dynamics are
+# largely independent of posting frequency, meaning changes in reactions
+# reflect algorithm/audience effects rather than just changes in content supply.
 # Get model correlations between 'reactions' and 'n_posts' in log-log scale
 svecs <- rlang::ll(
     "non-news" = c("log(n_posts)"),

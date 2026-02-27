@@ -43,6 +43,9 @@ data <- dataset %>%
 fitglmm <- function(
     formula,
     data,
+    # nbinom2 (quadratic variance: Var = mu + mu^2/k) is chosen because social media
+    # engagement counts are overdispersed relative to Poisson -- the variance grows
+    # faster than the mean, and nbinom2 captures this through the dispersion parameter k
     family = nbinom2,
     ziformula = ~1,
     dispformula = ~1,
@@ -52,6 +55,9 @@ fitglmm <- function(
 ) {
     ncores   <- min(parallel::detectCores(), config$parallel$maxcores)
     parallel <- rlang::ll(n = ncores, autopar = TRUE, !!!parallel)
+    # CG (conjugate gradient) optimizer is efficient with many parameters;
+    # profiling is disabled to avoid convergence issues with complex random effects;
+    # parallel gradient evaluation speeds up computation for high-dimensional models
     control  <- rlang::ll(
         profile = FALSE,
         optArgs = list(method = "CG"),
@@ -69,6 +75,11 @@ fitglmm <- function(
 
 # %% Fit model 0 ---------------------------------------------------------------------
 
+# Conditional model: log(reactions) ~ quality + log_n_posts, with nested random
+# intercepts (outlet within country) capturing outlet-level heterogeneity and
+# random slopes for quality by time period to allow quality effects to vary over time.
+# Dispersion sub-model: variance is allowed to differ by quality and log_n_posts,
+# with matching random effects, because engagement variance is strongly quality-dependent.
 frm <- reactions ~ quality + log_n_posts +
     (1 | country:name) +
     (1 + quality | year:month:day)

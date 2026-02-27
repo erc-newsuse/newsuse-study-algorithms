@@ -1,3 +1,8 @@
+"""DVC stage 'weekly'. Aggregates daily post-level data into weekly outlet-level
+time series using a two-step process: first daily means, then weekly means.
+This prevents high-volume posting days from disproportionately influencing
+weekly averages. Output: data/proc/weekly.parquet, data/proc/weekly-non-news.parquet.
+"""
 # %% ---------------------------------------------------------------------------------
 
 import numpy as np
@@ -48,6 +53,10 @@ signalcols = [
     "reactions_rel_cv",
 ]
 
+# Two-step aggregation: first compute daily means per outlet, then average
+# those daily means within each week. This ensures each day contributes
+# equally to the weekly value regardless of posting volume, which is
+# important because outlets vary widely in daily posting frequency.
 weekly = (
     dataset.groupby([*keycols, *datecols], observed=True)
     .agg(

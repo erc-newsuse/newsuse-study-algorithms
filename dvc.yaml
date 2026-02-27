@@ -1,4 +1,18 @@
+# =============================================================================
+# DVC Pipeline DAG — 12 stages in three phases.
+#
+# Phase 1 (Data Processing):  news, non-news, comscore, glmm@reactions, dataset
+# Phase 2 (Time Series):      weekly, signal, timeseries
+# Phase 3 (Analysis):         changepoints-detect, changepoints-postprocess,
+#                              glmm-news, glmm-both
+#
+# All outputs use persist: true to prevent DVC from cleaning them during
+# partial pipeline runs (important for large model files).
+# =============================================================================
+
 stages:
+
+  # --- Phase 1: Data Processing ---
 
   news:
     cmd: python stages/make_news.py
@@ -16,6 +30,9 @@ stages:
     - data/proc/counts.parquet:
         persist: true
 
+  # Parametric expansion: 'foreach' generates one stage per item (currently
+  # only 'reactions'). Fits a preliminary nbinom2 GLMM whose predictions
+  # enrich the dataset in the next stage.
   glmm:
     foreach:
     - reactions
@@ -62,6 +79,8 @@ stages:
     - data/proc/comscore.parquet:
         persist: true
 
+  # --- Phase 2: Time Series Construction ---
+
   weekly:
     cmd: python stages/make_weekly.py
     deps:
@@ -83,6 +102,10 @@ stages:
     - data/proc/signal.parquet:
         persist: true
 
+  # --- Phase 3: Changepoint Detection and Final GLMMs ---
+
+  # Two-stage changepoint process: 'changepoints-detect' runs BEAST 1000× in R,
+  # 'changepoints-postprocess' aggregates results, detects peaks, and assigns epochs.
   changepoints-detect:
     cmd: Rscript stages/changepoints_detect.R
     deps:
@@ -122,6 +145,9 @@ stages:
     - data/proc/timeseries.parquet:
         persist: true
 
+  # Final GLMM models: fitted after epochs are determined by changepoints.
+  # 'glmm-news' tests quality×epoch interaction for news posts only.
+  # 'glmm-both' compares news vs non-news engagement across epochs.
   glmm-news:
     cmd: Rscript stages/glmm_news.R
     deps:

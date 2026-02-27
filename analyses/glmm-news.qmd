@@ -47,6 +47,15 @@ alpha     <- config$inference$alpha
 conf      <- config$inference$conf
 adjust    <- config$inference$adjust
 
+# Configure emmeans globally:
+# - type="response": report estimated marginal means on the natural (response)
+#   scale rather than the link (log) scale, so results are directly interpretable
+#   as expected reaction counts.
+# - adjust="mvt": use the multivariate t distribution for multiple comparison
+#   correction, which is more powerful than Bonferroni because it accounts for
+#   correlations among contrasts.
+# - infer=TRUE: include confidence intervals and p-values in all summaries
+#   by default, avoiding the need to request them in every emmeans call.
 emm_options(
     emmeans  = list(type = "response", level = conf, adjust = adjust),
     contrast = list(adjust = adjust),
@@ -120,6 +129,10 @@ obs <- dataset %>%
 ```
 
 ```{r}
+# Extract and reshape random effects from glmmTMB models by parsing the
+# colon-separated grouping structure (e.g., "country:sector:name:epoch")
+# into separate columns. This makes it easier to merge random effect
+# estimates back to the data for computing variance-corrected EMMs.
 extract_outlet_re <- function(re, term) {
     parts <- str_split(term, ":", simplify = FALSE)[[1L]]
     estim <- re[[term]]
@@ -188,6 +201,12 @@ links = (
 ```{r}
 rg <- ref_grid(glmm, data = glmm$frame)
 
+# Log-normal correction for random-effect heterogeneity (Jensen's inequality):
+# When the link function is log and random effects are Gaussian,
+# exp(E[log(Y)]) < E[Y] due to Jensen's inequality. Without this correction,
+# estimated marginal means would underestimate the true population-level means.
+# The offset adjusts for the random-effect variance: E[Y] = exp(mu + sigma^2/2).
+#
 # Update regression coefficients in the reference grid
 # so they satisfy:
 # X(b + o) = mu + sigma^2_b / 2

@@ -1,3 +1,15 @@
+# =============================================================================
+# params.yaml — Single source of truth for all project parameters.
+# Consumed by Python (via dvc.api.params_show()) and R (via reticulate).
+# Path DSL: @ref/subpath resolves hierarchical references (e.g. @proc/news.parquet).
+# make!: directives specify factory classes for object construction.
+# ${eval:...} expressions allow inline arithmetic.
+# =============================================================================
+
+# --- Filesystem paths ---
+# All data and model paths. The @ref/subpath syntax resolves references
+# (e.g. @proc → @data/proc → data/proc). The make! directive constructs
+# a newsuse.config.Paths object providing pathlib.Path-like attribute access.
 paths:
   make!:          "newsuse.config:Paths"
   data:           "data"
@@ -23,11 +35,16 @@ paths:
   glmm:           "@models/glmm"
   figures:        "figures"
 
+# --- Reference dates ---
+# US presidential election dates used for contextual annotation in plots.
 elections:
   Clinton/Trump: "2016-11-08"
   Biden/Trump:   "2020-11-03"
   Harris/Trump:  "2024-11-05"
 
+# --- Data processing parameters ---
+# Column selection, author filtering, and reaction imputation settings
+# for the news and non-news data processing stages.
 data:
   usecols:
   - key
@@ -56,14 +73,25 @@ data:
     source: reactions
     target: reactions_combined
 
+# --- Signal construction ---
+# Grouping variables for aggregating weekly outlet data into country-level signals.
 signal:
   groups:
   - country
 
+# --- ComScore imputation ---
+# Forward/backward fill limit (months) for missing ComScore audience data.
 comscore:
   imputation:
     limit: 6
 
+# --- Changepoint detection ---
+# timescale: rolling window width in weeks (~2 months) for probability smoothing.
+# beast: BEAST algorithm parameters — seed, number of independent runs, metadata
+#   (time resolution, seasonality), and prior (trend complexity, knot constraints).
+# peaks: scipy.signal.find_peaks parameters for identifying changepoint locations.
+# subsets: named groups of signal columns to run BEAST on.
+# use: which subset's changepoints define epochs for downstream GLMM analyses.
 changepoints:
   timescale: ${eval:365.25 / 12 / 7 * 2}
   beast:
@@ -93,17 +121,27 @@ changepoints:
     reactions-rel-mu-cv: ["reactions_rel_mu", "reactions_rel_cv"]
   use: reactions-rel-mu-cv
 
+# --- Epoch filtering ---
+# Minimum posts per outlet×epoch required for inclusion in GLMM analyses.
 epochs:
   min_posts: 20
 
+# --- Statistical inference ---
+# Significance threshold, confidence level, and p-value adjustment method
+# (mvt = multivariate t-distribution, used by emmeans for multiple comparisons).
 inference:
   alpha: 0.05
   conf: ${eval:1-${.alpha}}
   adjust: mvt
 
+# --- Parallelization ---
+# Maximum CPU cores for glmmTMB parallel gradient evaluation.
 parallel:
   maxcores: 16
 
+# --- Machine learning classifiers ---
+# HuggingFace model identifiers and pinned revisions for text classification
+# (political content, negativity). Used in auxiliary analyses, not in the DVC pipeline.
 ml:
   inference:
     batch_size: 32
@@ -115,6 +153,9 @@ ml:
       name: sztal/erc-newsuse-negativity
       revision: ca2667b6ab5c6ea3f2e3b6bd17553e494a8f8723
 
+# --- Matplotlib plotting configuration ---
+# Style, color palette, and rcParams applied globally in analysis scripts.
+# The axes.prop_cycle uses a make! factory to construct a matplotlib cycler.
 plotting:
   style: seaborn-v0_8-deep
   color:

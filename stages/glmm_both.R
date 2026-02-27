@@ -55,6 +55,11 @@ nonnews <- as.character(paths$nonnews) %>%
         epoch = as.factor(epoch),
     ) %>%
     mutate(sector = "non-news", .after = "country") %>%
+    # Treating 'non-news' as an additional level of the quality factor (alongside
+    # low/medium/high) enables direct comparison within the same model. This is the
+    # difference-in-differences (DiD) identification strategy: non-news pages serve
+    # as the counterfactual, since they share the same platform but should not be
+    # directly affected by news-specific algorithm changes.
     mutate(quality = sector) %>%
     drop_na(epoch) %>%
     select(all_of(COLUMNS))
@@ -93,6 +98,11 @@ get_control <- function(
 
 # %% Fit quality model --------------------------------------------------------------
 
+# Random effects use sector-nested structure (outlet within sector within country)
+# because non-news outlets have systematically different baseline engagement than
+# news outlets. The simpler dispersion model (random intercepts only, no epoch
+# interaction) reflects that the primary variance heterogeneity is between sectors
+# rather than across time periods.
 frm  <- reactions ~ 1 + quality * epoch +
     (1 | country:sector:name) + (1 | country:sector:name:epoch) +
     (1 | quality:year:month:day)

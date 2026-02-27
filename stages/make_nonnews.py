@@ -1,3 +1,7 @@
+"""DVC stage 'non-news'. Processes raw non-news Facebook post data (pages not
+classified as news outlets). Reads Sotrender exports with automatic metadata
+extraction from filenames. Output: data/proc/non-news.parquet.
+"""
 # %% ---------------------------------------------------------------------------------
 
 from datetime import date
@@ -11,6 +15,9 @@ from project import config, paths
 
 # %% ---------------------------------------------------------------------------------
 
+# `read_data` automatically extracts outlet metadata (name, country, media type)
+# from standardized Sotrender export filenames using regex patterns, avoiding
+# the need for a separate metadata file.
 data = sotrender.read_data(
     paths.raw / "non-news-*.parquet",
     progress=True,

@@ -1,3 +1,9 @@
+"""DVC stage 'changepoints-postprocess'. Aggregates results from 1000 independent
+BEAST changepoint detection runs: combines per-variable changepoint probabilities
+into multivariate probabilities, maps to weekly grid, smooths with rolling
+window, detects peaks, and assigns sequential epoch labels.
+Outputs: data/proc/changepoints.parquet, data/proc/epochs.parquet.
+"""
 # %% ---------------------------------------------------------------------------------
 
 from calendar import isleap
@@ -17,6 +23,9 @@ figpath.mkdir(parents=True, exist_ok=True)
 
 # %% Get and preprocess raw data -----------------------------------------------------
 
+# Multivariate probability aggregation: for each time point, individual variable
+# probabilities are combined as P(any changepoint) = 1 - prod(1 - P_i), assuming
+# approximate independence between signals.
 raw = (
     DataFrame.from_(paths.beast)
     .groupby(["subset", "idx", "date"])["prob"]
@@ -60,6 +69,9 @@ timegrid = (
 
 # %% Prepare changepoints grid -------------------------------------------------------
 
+# Raw BEAST output uses continuous time coordinates; these are snapped to the
+# nearest weekly grid point and probabilities are normalized across runs to
+# produce a single consensus probability curve per variable subset.
 changepoints = (
     raw.groupby("subset")
     .apply(
@@ -83,6 +95,10 @@ changepoints = (
 
 # %% Raw changepoints data -----------------------------------------------------------
 
+# The smoothed probability curve (rolling window aggregation) is fed to scipy's
+# `find_peaks` with minimum distance and prominence thresholds (from params) to
+# identify distinct changepoint locations, filtering out noise while preserving
+# genuine structural breaks.
 data = changepoints.transform(
     lambda s: (
         s.rolling(window=round(config.changepoints.timescale))
@@ -143,6 +159,9 @@ fig.savefig(figpath / "posterior.pdf")
 
 # %% Make epochs ---------------------------------------------------------------------
 
+# Detected changepoint dates partition the time series into sequential epochs
+# (0, 1, 2, ...); each outlet x epoch combination must meet a minimum post count
+# threshold (from params) to be included in downstream GLMM analyses.
 cdf = peaksdata.query(f"subset.eq('{config.changepoints.use}')").reset_index(drop=True)
 
 # %% ---------------------------------------------------------------------------------
