@@ -31,19 +31,40 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from project import paths
 from newsuse.data import DataFrame
+
+FOCAL_EPOCHS = pd.Series([4, 8, 11], name="epoch")
+```
+
+```{python}
+types = (
+    DataFrame.from_(paths.dataset, columns=["key", "name", "quality", "type"])
+    .merge(DataFrame.from_(paths.epochs))
+    .groupby(["epoch", "quality", "name"])["type"]
+    .value_counts(normalize=True)
+    .sort_index()
+    .unstack("type", fill_value=0.0)
+    .drop(columns=["music", "reshare", "status"])
+    .assign(visual=lambda df: df["photo"] + df["video"])
+)
 ```
 
 ```{python}
 emm = DataFrame.from_(paths.proc / "outlets-emm.xlsx").ffill()
+
+outlets_include = (
+    emm.groupby("name")["epoch"]
+    .apply(lambda s: FOCAL_EPOCHS.isin(s).all())
+    .pipe(lambda s: s[s])
+    .index
+    .tolist()
+)
+
+emm = emm[emm["name"].isin(outlets_include)].reset_index(drop=True)
+```
+
+```{python}
 e11e4 = (
-    emm.pipe(
-        lambda df: df[
-            df["name"].isin(
-                df.groupby("name")["epoch"].nunique()
-                .pipe(lambda s: s[s >= 12].index)
-            )
-        ]
-    )
+    emm
     .set_index(["epoch", "quality", "name"])["reactions"]
     .groupby(["quality", "name"])
     .apply(lambda s: s[11] / s[4])
@@ -61,4 +82,27 @@ x = (
 fig, ax = plt.subplots()
 ax.plot(x.index, x)
 ax.set_yscale("log")
+```
+
+## Post type effects
+
+```{python}
+(
+    emm
+    .merge(types.reset_index())
+    .set_index(["epoch", "quality", "name"])
+    .drop(columns=["n"])
+    .groupby(["quality", "name"])
+    .apply(
+        lambda s: pd.Series(
+            [s[8] / s[4], s[11] / s[4], s[11] / s[8]],
+            index=pd.Series(["8 / 4", "11 / 4", "11 / 8"], name="contrast"),
+            name="ratio",
+        )
+    )
+    .pipe(lambda s: s.droplevel(["quality", "name"]))
+    # .pipe(lambda s: pd.concat(s.tolist(), keys=s.index))
+    # .reset_index()
+    # .merge(types, left_on=["epoch", "quality", "name"], right_index=True)
+)
 ```
