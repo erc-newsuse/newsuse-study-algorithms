@@ -1,7 +1,12 @@
 # NEWSUSE | Algorithms
 
 Analysis of the impact of news feed algorithm changes on Facebook on user engagement
-and posting patterns of media organizations.
+and posting patterns of media organizations. Current ingestion covers 2016 through
+December 2025, including the period before, during, and after the "War on News".
+
+Contributor guidance: [AGENTS.md](AGENTS.md). Detailed project reference:
+[wiki](wiki/README.md), including [data contracts](wiki/data-contracts.md), the
+[DVC pipeline](wiki/dvc-pipeline.md), and [statistical methods](wiki/statistical-methods.md).
 
 Companion repository for the paper:
 
@@ -11,8 +16,9 @@ This is a mixed **Python + R** project orchestrated by [DVC](https://dvc.org/)
 (Data Version Control). Raw Facebook post data from Sotrender is processed through
 a 12-stage pipeline that produces weekly time series, detects structural changepoints
 via Bayesian methods, and fits generalized linear mixed models (GLMMs) to quantify
-algorithm-driven shifts in engagement. Post-pipeline analysis and figure generation
-are handled by [Quarto](https://quarto.org/) notebooks.
+engagement shifts across detected epochs and news/non-news groups. Causal
+interpretation depends on the study's comparison assumptions. Further inference
+and figure generation are handled by [Quarto](https://quarto.org/) notebooks.
 
 
 ## Architecture and design decisions
@@ -21,7 +27,7 @@ are handled by [Quarto](https://quarto.org/) notebooks.
 
 The project uses **Python** for data wrangling, time series construction, and
 changepoint postprocessing, and **R** for statistical modeling and inference.
-The R ecosystem is used for three capabilities without mature Python equivalents:
+The R components use three specialist packages:
 
 - **`glmmTMB`** -- fitting complex GLMMs with separate dispersion sub-models,
   nested random effects, and negative binomial families (`nbinom1`, `nbinom2`)
@@ -41,52 +47,46 @@ configuration in both languages:
 This guarantees that every stage -- regardless of language -- reads the same
 parameter values and resolves file paths identically.
 
-### `params.yaml` as single source of truth
+### Shared configuration in `params.yaml`
 
-All project parameters live in `params.yaml` and are consumed by both Python and R
-through the `project` bridge package. The file uses three DVC/newsuse extensions:
+Shared parameters live in `params.yaml` and are consumed by both Python and R
+through the `project` bridge package. Model formulas and some notebook constants
+remain in code. DVC supplies the parameter mapping; `newsuse.config.Config`
+resolves OmegaConf expressions, and its callable factories construct objects
+when invoked. `project` explicitly constructs the rooted `Paths` object.
+See [configuration details](wiki/architecture.md#configuration-lifecycle).
+
+The file uses these `newsuse` configuration conventions:
 
 | Syntax | Purpose |
 |---|---|
 | `@ref/subpath` | Hierarchical path references (e.g. `@proc/news.parquet` resolves to `data/proc/news.parquet`) |
-| `make!:` | Factory directives that instantiate Python objects (e.g. `newsuse.config:Paths`, `matplotlib:cycler`) |
+| `make!:` | Callable factory specifications (e.g. `newsuse.config:Paths`, `matplotlib:cycler`); not all are constructed by `Config.resolve()` |
 | `${eval:...}` | Inline arithmetic expressions (e.g. `${eval:365.25 / 12 / 7 * 2}` for a 2-month window in weeks) |
 
 ### Data exchange
 
-- **Tabular data**: Apache Parquet everywhere (read/written by both Python and R via `arrow`)
+- **Processed tables**: primarily Apache Parquet (Python tabular I/O and R `arrow`)
 - **Fitted models**: R `.rds` files (serialized glmmTMB objects, loaded in analysis notebooks)
-- **Auxiliary data**: Excel (`.xlsx`) for ComScore/Statista reference data and event annotations
+- **Auxiliary data**: Excel (`.xlsx`) for Statista, event annotations, and notebook outlet exports; ComScore uses Parquet
 
 
 ## DVC pipeline
 
 The pipeline is defined in `dvc.yaml` and consists of **12 stages in three phases**.
-All outputs use `persist: true` to survive partial pipeline reruns.
+All declared outputs use `persist: true` to avoid pre-run cleanup; stage commands
+can still overwrite them. Additional script outputs and dependencies are not
+fully declared; see the [tracking boundaries](wiki/dvc-pipeline.md#tracking-boundaries).
 
 ### Pipeline DAG
 
-```
-Phase 1 -- Data Processing        Phase 2 -- Time Series     Phase 3 -- Changepoints & GLMMs
+The main chain is news ingestion → preliminary GLMM → augmented dataset → weekly
+summaries → signals → BEAST → epochs → final GLMMs. Non-news joins the weekly and
+final-model branches; dense time series and ComScore support auxiliary analyses.
+The 2025 input extends both sectors.
 
-  news-us.parquet ──► news ──┐      ┌──► weekly ──► signal ──► changepoints-detect
-  metadata.parquet ──┘       │      │                    │          │
-  imputed-reactions ─┘       │      │                    │    changepoints-postprocess
-                             │      │                    │          │
-  glmm@reactions ◄──── news ─┤      │                    │    ┌─────┘
-            │                │      │                    │    │
-            ▼                │      │                    │    │
-        dataset ─────────────┼──────┘                    │    │
-                             │                           │    │
-  non-news-us.parquet ──► non-news ──► weekly ───► timeseries │
-                                                         │    │
-  comscore.parquet ──► comscore                          │    │
-                                                         │    │
-                                          dataset ───────┼────┼──► glmm-news
-                                          non-news ──────┤    │
-                                          epochs ────────┼────┘
-                                                         └──────► glmm-both
-```
+See the [full dependency graph and stage interfaces](wiki/dvc-pipeline.md), which
+distinguishes DVC-declared edges from additional script dependencies.
 
 ### Stage summary
 
@@ -99,8 +99,8 @@ Phase 1 -- Data Processing        Phase 2 -- Time Series     Phase 3 -- Changepo
 | 1 | `dataset` | `stages/make_dataset.R` | R | Augment news data with GLMM-derived predictions (mean, variance, CV) |
 | 2 | `weekly` | `stages/make_weekly.py` | Python | Two-step daily-to-weekly aggregation (daily means, then weekly means) |
 | 2 | `signal` | `stages/make_signal.py` | Python | Country-level engagement signals from log-transformed weekly data |
-| 2 | `timeseries` | `stages/make_timeseries.py` | Python | Dense contiguous time series via cross-product grid + interpolation |
-| 3 | `changepoints-detect` | `stages/changepoints_detect.R` | R | 1000 independent BEAST runs for robust changepoint probabilities |
+| 2 | `timeseries` | `stages/make_timeseries.py` | Python | Grid within outlet observation spans; interpolate week indices and zero-fill missing counts/reactions |
+| 3 | `changepoints-detect` | `stages/changepoints_detect.R` | R | 1000 seeded BEAST runs for each of two signal subsets |
 | 3 | `changepoints-postprocess` | `stages/changepoints_postprocess.py` | Python | Aggregate probabilities, smooth, detect peaks, assign epoch labels |
 | 3 | `glmm-news` | `stages/glmm_news.R` | R | nbinom1 GLMM testing quality x epoch interaction (news only) |
 | 3 | `glmm-both` | `stages/glmm_both.R` | R | nbinom1 GLMM comparing news vs. non-news (difference-in-differences design) |
@@ -113,13 +113,16 @@ The `glmm` stage uses DVC's `foreach` expansion -- currently parameterized over
 
 The project separates **automated pipeline stages** from **manual analysis**:
 
-- **`stages/`** (7 Python + 5 R scripts): executed by DVC (`dvc repro`), produce
-  processed data and fitted models. These are the pipeline's computational backbone.
+- **`stages/`**: 7 Python + 5 R scripts are executed by DVC (`dvc repro`) to
+  produce processed data and fitted models. The additional `beast.R` is a
+  historical standalone prototype, not an active stage or sourced helper.
 
 - **`analyses/`** (Quarto `.qmd` notebooks): executed manually after the pipeline
-  completes. They load pre-fitted models and processed data, run `emmeans`-based
+  completes. They load fitted models and processed data, run `emmeans`-based
   inference (estimated marginal means, contrasts, difference-in-differences),
-  and generate figures and LaTeX tables for the paper.
+  and generate figures and LaTeX tables for the paper. `timeseries.qmd` also
+  fits models during rendering. See the [complete notebook map](wiki/analyses-and-outputs.md)
+  for inputs, outputs, and the outlet spreadsheet filename mismatch.
 
   | Notebook | Content |
   |---|---|
@@ -133,8 +136,9 @@ The project separates **automated pipeline stages** from **manual analysis**:
   | `glmm-outlets.qmd` | Outlet-level random effect analysis |
   | `model-tables.qmd` | Publication-ready model coefficient tables (LaTeX) |
 
-- **`analyses/validation/`**: robustness checks replicating `glmm-news` and
-  `glmm-both` under alternative specifications.
+- **`analyses/validation/`**: diagnostics of the existing news and joint models,
+  including observed/predicted group means and random-effect distributions.
+  These notebooks do not refit alternative model specifications.
 
 
 ## Repository setup
@@ -151,7 +155,7 @@ The project separates **automated pipeline stages** from **manual analysis**:
 1. **Clone the repository**
 
 ```bash
-git clone git+ssh://git@github.com/erc-newsuse/newsuse-study-algorithms.git
+git clone git@github.com:erc-newsuse/newsuse-study-algorithms.git
 cd newsuse-study-algorithms
 ```
 
@@ -162,8 +166,9 @@ conda env create -f environment.yaml
 conda activate newsuse-study-algorithms
 ```
 
-The environment provides Python >= 3.11, R >= 4.3, DVC, and all R packages
-except `glmmTMB` and `Rbeast` (which require pinned versions, installed next).
+The environment specifies Python >= 3.11 and < 3.13, R >= 4.3, DVC, and the
+principal R dependencies except `glmmTMB` and `Rbeast` (installed next).
+Quarto is installed separately; PDF rendering also needs a PDF/TeX toolchain.
 
 3. **Initialize the project**
 
@@ -171,22 +176,27 @@ except `glmmTMB` and `Rbeast` (which require pinned versions, installed next).
 make init
 ```
 
-This command performs the following steps:
+This is initial provisioning, not routine maintenance of an existing checkout.
+It runs `git init`, reinitializes DVC with `--force`, and replaces the local
+default remote with `data/remote`. Review existing setup first. Its steps include:
+
 - `pip install -e .[dev]` -- installs the `project/` package in editable mode
   along with all Python dependencies (including `newsuse` v2.3 from GitHub)
 - `pre-commit install` -- sets up Git pre-commit hooks (ruff linting)
 - Creates required directories (`data/raw/`, `data/proc/`, etc.)
-- `dvc init --force` -- initializes DVC with local remote storage
+- `dvc init --force` and `dvc remote add ... --local --force` -- initialize DVC and set the local default remote; enable DVC autostaging
 - Installs pinned R packages via `remotes::install_version`:
   - `glmmTMB` 1.1.10
   - `Rbeast` 1.0.1
 
 4. **Fetch raw data**
 
-The raw data files are tracked by DVC but not stored in Git. Either contact the
-study authors for DVC remote access, or place files in `data/raw/` manually.
+The following files have tracked DVC pointers but are not stored in Git.
+Contact the study authors for appropriate data/remote access, or supply matching
+files in `data/raw/`. The tracked DVC config does not define a shared remote;
+`make init` creates a local remote path, not access to the authors' data.
 
-Required raw data files:
+Active pipeline inputs and the notebook's Statista input:
 
 | File | Description |
 |---|---|
@@ -197,8 +207,12 @@ Required raw data files:
 | `comscore.parquet` | ComScore monthly unique visitor estimates |
 | `2025.parquet` | Extended 2025 data (news + non-news) |
 | `statista-facebook-users.xlsx` | Statista reference data on Facebook user counts |
-| `content-news-us.parquet` | Post content/text data (for ML classification) |
-| `content-non-news-us.parquet` | Non-news post content data |
+
+The Git-tracked `data/aux/events.xlsx` supplies notebook annotations.
+Optional `content-news-us.parquet` and `content-non-news-us.parquet` files are
+not inputs to the current DAG and have no tracked DVC pointers. Historical
+classification artifacts and `ml` configuration do not define an active
+classification workflow. See [data provenance](wiki/data-contracts.md).
 
 If you have access to the DVC remote:
 
@@ -231,7 +245,7 @@ dvc repro
 ### Execute specific stages
 
 ```bash
-# Individual stages
+# Target stages and their changed dependencies
 dvc repro news
 dvc repro non-news
 dvc repro dataset
@@ -245,7 +259,10 @@ dvc repro glmm-both
 
 ## Running the analyses
 
-Ensure the DVC pipeline has completed (`dvc status` should report "up to date").
+Ensure the required pipeline artifacts are ready, then check each notebook's
+[additional prerequisites](wiki/analyses-and-outputs.md). DVC status alone is
+insufficient: epoch metadata is an undeclared output, and the outlet notebook
+expects a spreadsheet without a matching tracked producer.
 
 ```bash
 cd analyses
@@ -254,7 +271,7 @@ cd analyses
 quarto render descriptives.qmd
 quarto render glmm-both.qmd
 
-# Render all notebooks in the directory
+# Render all notebooks only after resolving every notebook's prerequisites
 quarto render
 
 # Render validation analyses
@@ -270,7 +287,7 @@ Output format is configured per-notebook (HTML with embedded resources and/or PD
 ```
 .
 ├── analyses/                 Quarto analysis notebooks (manual, post-pipeline)
-│   ├── validation/           Robustness check notebooks
+│   ├── validation/           Fitted-model diagnostic notebooks
 │   ├── _quarto.yml           Quarto project config
 │   ├── descriptives.qmd
 │   ├── timeseries.qmd
@@ -304,10 +321,12 @@ Output format is configured per-notebook (HTML with embedded resources and/or PD
 │   ├── changepoints_postprocess.py
 │   ├── glmm_news.R
 │   ├── glmm_both.R
-│   └── beast.R              BEAST helper utilities
-├── tests/                    Python unit tests
+│   └── beast.R               Historical standalone BEAST prototype
+├── wiki/                     Detailed research and computational reference
+├── AGENTS.md                 Canonical contributor guidance
+├── .github/skills/           Four reusable project workflows
 ├── dvc.yaml                  Pipeline DAG definition
-├── params.yaml               All project parameters
+├── params.yaml               Shared project parameters
 ├── environment.yaml          Conda environment specification
 ├── pyproject.toml            Python project metadata and tool config
 ├── Makefile                  Development commands
@@ -324,8 +343,8 @@ Python library (installed from GitHub via pip), which provides:
 
 - **`newsuse.config.Config`** -- recursive parameter resolution with `make!:` factories
 - **`newsuse.config.Paths`** -- path DSL (`@ref/subpath`) resolution into `pathlib.Path` objects
-- **`newsuse.data.DataFrame`** -- Parquet I/O wrapper with schema validation
-- **`newsuse.sotrender`** -- Sotrender export readers with filename-based metadata extraction
+- **`newsuse.data.DataFrame`** -- pandas-based I/O wrapper dispatching by storage type, including Parquet and Excel
+- **`newsuse.data.sotrender`** -- Sotrender export readers with filename-based metadata extraction
 
 ### Key R packages
 
@@ -345,13 +364,16 @@ The project uses several code quality tools, configured in `pyproject.toml`:
 
 | Tool | Command | Scope |
 |---|---|---|
-| **ruff** | `make lint` | Linting and formatting (Python) |
-| **mypy** | `make mypy` | Static type checking (Python) |
-| **pytest** | `make test` | Unit tests with doctest support |
-| **coverage** | `make coverage` | Test coverage reporting |
-| **pre-commit** | (automatic) | Runs ruff on staged files before commit |
+| **ruff** | `make lint` | Lint checks on `project/` only; no formatting in this target |
+| **mypy** | `make mypy` | Static type checking of `project/` only |
+| **pytest** | `make test` | Configured collection/doctests; no dedicated test suite is tracked |
+| **coverage** | `make coverage` | Coverage of configured pytest collection, not pipeline validation |
+| **pre-commit** | (automatic) | File checks, Ruff automatic fixes, and formatting; may rewrite files |
 
-Run `make help` for a complete list of available commands.
+There is no tracked `tests/` directory. Stage assertions and notebook diagnostics
+provide selected checks, not a comprehensive automated statistical test suite.
+See [validation guidance](wiki/development-and-reproducibility.md#validation-by-change-type).
+Run `make help` for a list of development commands.
 
 
 ## Troubleshooting
@@ -365,7 +387,7 @@ dvc status
 # Inspect configuration
 dvc config --list
 
-# Force-rerun a specific stage
+# Force a target rerun only when intentional recomputation is required
 dvc repro --force <stage-name>
 ```
 
@@ -393,7 +415,8 @@ conda env update -f environment.yaml
 ### Quarto rendering
 
 If Quarto notebooks fail, ensure:
-1. The DVC pipeline has run to completion (`dvc status` shows up to date)
-2. The correct Conda environment is active
+
+1. Required models/data are current, including undeclared epoch metadata and notebook-specific inputs
+2. The correct Conda environment and Quarto installation are available
 3. R can find `reticulate` and the Python environment:
    `R -e 'reticulate::py_config()'`
