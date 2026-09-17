@@ -1,6 +1,6 @@
 ---
 name: update-wiki
-description: Correct or extend existing wiki pages when this research project's code, data contracts, methods, or workflows change. Maintains evidence and navigation without modifying computational files.
+description: Correct or extend this project's wiki references and concern records when behavior, workflows, or supporting evidence changes. Maintains evidence and navigation without modifying computational files.
 ---
 
 # Update wiki pages
@@ -22,8 +22,13 @@ in one place and link to it rather than duplicating it.
 
 Label observations from local artifacts as snapshots and retain uncertainty
 where data or reproduction evidence is unavailable. Never recast an unresolved
-statistical inconsistency as a validated scientific conclusion. Keep durable
-technical limitations in context and omit task-session logs and bug backlogs.
+statistical inconsistency as a validated scientific conclusion. Keep verified
+explanations in reference pages; consolidate detailed unresolved questions in
+the [concerns register](../../../wiki/concerns/README.md), following its evidence,
+classification, and resolution conventions. Preserve short caveats and links
+beside the affected behavior, with links back from concern records. Resolve a
+concern only with supporting evidence, not because its prose was corrected.
+Omit session logs, assignments, and implementation commitments.
 
 Edit only `wiki/`. Report needed changes to agent guidance or computational
 files separately unless the user explicitly expands the task. Do not run

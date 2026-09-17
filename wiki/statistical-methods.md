@@ -10,7 +10,8 @@ remain in scripts and notebooks.
 ## Preliminary news model
 
 [glmm_reactions.R](../stages/glmm_reactions.R) fits an NB2 GLMM to news reactions.
-Quality is ordered `low`, `medium`, `high`; year/month/day become factors. Rows
+Quality is a nominal factor with levels in the order `low`, `medium`, `high`,
+not an ordinal factor; year/month/day become factors. Rows
 missing any selected modeling field are dropped. The conditional formula is:
 
 ```r
@@ -23,6 +24,8 @@ Zero inflation is disabled by the actual `ziformula = ~0` call, despite the
 helper's default. The post-frequency covariate enters this preliminary model;
 it does not enter the final epoch models. The fitted object is saved to
 `models/glmm/reactions/main.rds`.
+Its optimizer controls differ from the final models; see
+[optimizers and seeds](#optimizers-and-random-seeds).
 
 [make_dataset.R](../stages/make_dataset.R) predicts mean `mu`, log-link value,
 and dispersion `theta` using the model and the full news dataset, with
@@ -79,6 +82,10 @@ interpolates **week indices only inside observed spans**, drops unresolved
 endpoints, and fills missing `n_posts` and `reactions` with zero. It asserts no
 nulls and consecutive week indices per outlet group. It does not interpolate
 engagement or guarantee coverage outside each outlet's observed span.
+See [sample coverage](data-contracts.md#sample-eligibility-and-coverage) for the
+observation versus missingness distinction and [supporting analyses](supporting-analyses.md)
+for notebook-specific weighting. Calendar and multi-country assumptions are
+tracked under [weekly alignment](concerns/epochs-and-annotations.md#calendar-conversion-and-weekly-alignment).
 
 ## BEAST detection and peak selection
 
@@ -112,6 +119,9 @@ of the processed probability curve at the default half-prominence level;
 they are not automatically Bayesian credible intervals for a changepoint date.
 The product-complement operations and rolling transformation should be described
 explicitly, rather than calling the final curve a simple average posterior.
+See concerns about [calendar conversion](concerns/epochs-and-annotations.md#calendar-conversion-and-weekly-alignment)
+and [run normalization](concerns/epochs-and-annotations.md#run-normalization-and-empty-detections)
+before generalizing these operations to different time ranges or empty runs.
 
 ## Epoch construction
 
@@ -193,6 +203,33 @@ subsequently permute the reference grid to `non-news`, `low`, `medium`, `high`.
 The joint dispersion model has no fixed quality-by-epoch term, but **does** have
 outlet/epoch random effects. Output: `models/glmm/both/quality.rds`.
 
+## Optimizers and random seeds
+
+[glmm_reactions.R](../stages/glmm_reactions.R) supplies `profile = FALSE`,
+`optArgs = list(method = "CG")`, and `optCtrl = list(maxit = 1000L)` without
+an explicit optimizer. On **2026-09-17**, constructing that control object with
+installed glmmTMB **1.1.10** selected the default `nlminb`. Passing a method
+argument alone does not select `optim`. Final
+[news](../stages/glmm_news.R) and [joint](../stages/glmm_both.R) stages explicitly
+use `optimizer = optim` with CG. This is a source/control-object distinction,
+not confirmation of how existing stored models were fitted; see the
+[optimizer concern](concerns/reproducibility.md#preliminary-optimizer-description).
+
+| Source | Explicit seed and scope |
+|---|---|
+| [Active BEAST detector](../stages/changepoints_detect.R), [parameters](../params.yaml) | Master R seed 303 samples 1,000 distinct seeds; each becomes the MCMC seed for the corresponding run, reused across subsets. |
+| [News inference](../analyses/glmm-news.qmd) | `set.seed(10105)` before EMM/contrast construction and subsequent summaries. |
+| [Total effects](../analyses/glmm-total.qmd) | `set.seed(303L)` before tidying focal 4→8→11 summaries; `set.seed(304L)` before tidying 4→11 summaries. |
+| [Joint inference](../analyses/glmm-both.qmd), [time-series inference](../analyses/timeseries.qmd) | `mvt.args = list(abseps = 1e-4)` configured, but no explicit R `set.seed` call in either notebook. |
+| [News](../analyses/glmm-news.qmd) and [joint](../analyses/glmm-both.qmd) plotting | `so.Jitter(x=14, seed=17)` controls cosmetic horizontal jitter, not inference. |
+| Active GLMM fitting stages | No explicit seed call; inspect actual optimizer/package behavior rather than assuming random fitting or exact repeatability. |
+
+Seeds in the historical [beast.R](../stages/beast.R) do not govern the active
+detector. Notebook seeds govern their execution sequence, not separate sessions.
+Seed placement is not a guarantee of identical results across package versions,
+threads, platforms, or changed call order; see
+[random-seed scope](concerns/reproducibility.md#random-seed-scope).
+
 ## Marginal means and contrasts
 
 [glmm-news.qmd](../analyses/glmm-news.qmd),
@@ -205,9 +242,11 @@ This implements a log-scale heterogeneity correction. The response remains
 negative-binomial; a lognormal-moment argument for a latent mean does not make
 the observed count distribution lognormal. The code changes the coefficient
 point estimates without explicitly propagating uncertainty in this correction.
+Its interpretation is tracked under
+[correction uncertainty](concerns/inference-and-interpretation.md#marginal-mean-correction-uncertainty).
 
 Inference defaults are alpha 0.05, confidence 0.95, and `mvt` multiplicity
-adjustment, with notebook-specific overrides/seeds. Contrast families include
+adjustment, with notebook-specific overrides and [seeds](#optimizers-and-random-seeds). Contrast families include
 effects relative to a grand mean, consecutive epochs, and quality differences
 within epochs. The joint grid groups three news quality levels into a news
 sector, with equal-quality contrast weights where explicitly coded.
@@ -225,29 +264,15 @@ a ratio above or below one as a decrease, recovery, or relative disadvantage.
 
 ## Interpretation and review points
 
-These source discrepancies need targeted investigation before relying on the
-affected numerical results; this documentation does not measure their impact.
+Detailed evidence and resolution criteria live in the concerns register:
 
-- In [glmm-both.qmd](../analyses/glmm-both.qmd), the parallel-trends section takes
-  estimates from `ptcon` but covariance from `con`, an earlier overall epoch
-  contrast rather than that interaction object. The "before" index range also
-  uses `1:START_WAR`, whereas the baseline is described as epochs 0–4. Verify
-  covariance alignment and the transition included at the intervention boundary.
-- Both validation notebooks compute `sigma` using an NB2-style
-  `mu * (1 + mu / theta)` expression while loading final NB1 models. Check the
-  intended dispersion interpretation and whether that summary is used by a
-  reported result. See [news validation](../analyses/validation/glmm-news.qmd)
-  and [joint validation](../analyses/validation/glmm-both.qmd).
-- The news supplement assigns contrast weights at R positions 5 and 10; the
-  joint supplement uses 5 and 9. With epochs 0–11, these compare 4→9 and 4→8,
-  respectively. Do not describe them as the same interval without verification.
-- Fractional-year conversion in postprocessing independently constructs month
-  and day, rather than using a single decimal-year conversion. Year/ISO-week
-  matching and normalization by maximum observed run index also embed
-  assumptions, including retention of the last run. Check boundary and empty-run
-  behavior before changing the time range or treating this as a general method.
+- [Parallel-trends covariance and indexing](concerns/statistical-calculations.md#parallel-trends-covariance-and-indexing).
+- [Validation variance family](concerns/statistical-calculations.md#validation-variance-family).
+- [Supplementary contrast intervals](concerns/statistical-calculations.md#supplementary-contrast-intervals).
+- [Calendar mapping and run normalization](concerns/epochs-and-annotations.md).
 
-Data-derived epochs are treated as fixed in downstream model inference. These
-scripts do not propagate changepoint-selection uncertainty through the final
-GLMM contrasts. Non-news counterfactual validity and annotation alignment are
-additional interpretation questions described in [study design](study-design.md).
+Downstream inference treats selected epochs as fixed; it does not propagate
+selection uncertainty. See [epoch uncertainty](concerns/inference-and-interpretation.md#selected-epochs-treated-as-fixed)
+and [causal assumptions](concerns/inference-and-interpretation.md#causal-comparison).
+These limits do not establish numerical impact. Supporting descriptive and
+AR(1) calculations are explained in [their reference](supporting-analyses.md).

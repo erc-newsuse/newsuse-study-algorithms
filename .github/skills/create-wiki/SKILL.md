@@ -1,6 +1,6 @@
 ---
 name: create-wiki
-description: Create source-supported research, architecture, data, pipeline, or technical reference pages under this repository's wiki directory. Use for durable project knowledge, not session logs or bug tracking.
+description: Create source-supported project reference pages or evidence-backed concern records under wiki when documentation work is requested. Does not change computations or create session logs.
 ---
 
 # Create wiki pages
@@ -25,8 +25,12 @@ implemented calculations, and Mermaid when a dependency diagram adds clarity.
 Separate implementation facts from scientific interpretation and unverified
 questions. Label artifact counts and dates as snapshots. Distinguish policy
 annotations from detected epochs and declared DVC edges from runtime dependencies.
-Describe reproducibility limitations in context, without creating a task backlog
-or inventing numerical effects of a suspected defect.
+Use reference pages for verified behavior. Put detailed unresolved questions in
+the [concerns register](../../../wiki/concerns/README.md), following its evidence,
+classification, and resolution conventions. Link both ways and keep a brief
+caveat beside the affected explanation. A concern record is technical evidence,
+not an assignment or authorization to fix computations. Do not invent numerical
+effects, create session logs, or mark a concern resolved by improving its prose.
 
 Update `wiki/README.md` and affected wiki cross-links so the page is discoverable.
 Validate relative links, Markdown fences, filenames, and claims against sources.

@@ -59,6 +59,8 @@ and `LAST_EPOCH = 11`. Baseline comparisons use epochs 0–4; selected total-eff
 comparisons use epochs 4, 8, and 11. These are code-level conventions tied to a
 particular segmentation. Re-estimating epochs requires checking their meaning,
 contrast weights, and alignment with the annotation workbook.
+The [figure coordinate map](analyses-and-outputs.md#figure-coordinates) identifies
+which plots use annotation dates, detected timestamps, or adjusted display positions.
 
 ## Comparisons and causal interpretation
 
@@ -74,7 +76,10 @@ composition, measurement changes, and policy effects on the comparison group
 can challenge that interpretation. The code labels some estimates "causal";
 the label is not proof. A failure to reject a pre-period test also does not prove
 the assumption. The implemented parallel-trends calculation has an unresolved
-covariance-selection issue described in [methods](statistical-methods.md#interpretation-and-review-points).
+covariance-selection issue recorded in the
+[concerns register](concerns/statistical-calculations.md#parallel-trends-covariance-and-indexing).
+Detailed verification limits and next checks are in
+[causal comparison](concerns/inference-and-interpretation.md#causal-comparison).
 
 [alternatives.qmd](../analyses/alternatives.qmd) compares engagement trends with
 ComScore audiences and Statista Facebook user counts.
@@ -89,3 +94,5 @@ the outlet sampling frame, rating procedure behind quality labels, upstream
 reaction-imputation procedure, or all data-access terms. Describe these as
 provenance gaps rather than guessing from category names. The wiki does not
 independently validate effect sizes or publication conclusions.
+Required evidence and resolution criteria are collected under
+[upstream and manuscript evidence](concerns/sampling-and-provenance.md#upstream-and-manuscript-evidence).

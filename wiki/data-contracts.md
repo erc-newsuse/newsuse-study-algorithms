@@ -33,6 +33,8 @@ workflow. The corresponding script names are ignored by
 Do not assume `dvc pull` supplies optional content files. The repository does
 not document all collection, rating, imputation, or licensing details; obtaining
 the files and understanding their upstream provenance are separate concerns.
+See [upstream evidence](concerns/sampling-and-provenance.md#upstream-and-manuscript-evidence)
+and [optional artifact availability](concerns/reproducibility.md#optional-artifacts-and-environment).
 
 ## News ingestion and identity
 
@@ -69,6 +71,35 @@ combined data. These counts/averages are computed before the final exclusion of
 rows with missing reactions. The final news table asserts unique keys, integral
 nonmissing reactions, and the exact current date endpoints.
 
+## Sample eligibility and coverage
+
+In [make_news.py](../stages/make_news.py), metadata completeness means nonmissing
+`name`, `quality`, `type`, `bias`, and `followers`: `.dropna()` acts on all five
+selected columns before metadata is joined to posts. Daily counts and outlet
+averages group by quality, with pandas' default exclusion of missing group
+labels. The average-table merge uses the default inner join, so posts without
+matching quality metadata can disappear there, before the explicit final
+missing-reaction filter. Even metadata fields absent from a model formula can
+therefore affect inclusion. This is a source-level rule, not a measured
+attrition count; see [metadata eligibility](concerns/sampling-and-provenance.md#metadata-eligibility).
+
+Other eligibility steps remain distinct: base author filtering, extension
+restriction to existing names, deduplication, missing-reaction exclusion, and
+later outlet/epoch groups with strictly more than 20 posts. A complete attrition
+account must follow post keys across those steps instead of subtracting unrelated
+artifact row counts. The extension's separate path is described above.
+
+The [weekly stage](../stages/make_weekly.py) records observed outlet/weeks.
+Outlets need not start and end together or have all internal weeks. Signal and
+notebook averages use available contributors; changes can reflect both within-
+outlet values and panel composition. The [dense-series stage](../stages/make_timeseries.py)
+fills internal outlet gaps with zero counts/reactions after week-index
+interpolation, without extending every outlet across the full study period.
+The [supporting analyses](supporting-analyses.md) identify which representation
+each notebook consumes. An absent weekly observation does not itself establish
+zero activity or a collection failure; see
+[missingness assumptions](concerns/sampling-and-provenance.md#coverage-and-missingness).
+
 ## Non-news and audience processing
 
 [make_nonnews.py](../stages/make_nonnews.py) delegates base-export parsing to
@@ -88,6 +119,8 @@ pass. This is bounded filling, not linear interpolation. The two passes can
 fill more than six missing positions in total. An assertion checks that retained
 nonmissing series begin on 2016-01-01. Contrary to its comments, the script never
 reads the news data or filters against its outlet set.
+The [selection concern](concerns/sampling-and-provenance.md#comscore-selection)
+separates that source discrepancy from the unverified composition of the input.
 
 ## Processed tables
 
@@ -145,6 +178,16 @@ Metadata inspection on **2026-09-17**, without rerunning stages, found:
 | Signal / BEAST candidates | 519 / 37,378 |
 | Peaks / epoch metadata | 22 across two subsets / 12 epochs |
 | Eligible epoch keys / dense time series | 6,164,797 / 30,920 |
+
+Read-only inspection of `data/proc/weekly.parquet` and
+`data/proc/weekly-non-news.parquet` on the same date found 40 news outlets
+(14 high, 13 medium, 13 low quality) and 21 non-news pages. Ten news outlets and
+15 non-news pages had missing internal `week_t` values between their own minimum
+and maximum week indices; start/end coverage also differed. These counts use
+distinct country/name pairs and do not imply gaps in every group-level series.
+The five metadata columns selected by ingestion had no missing values in the
+inspected `data/raw/metadata.parquet`. None of these observations proves that
+all raw posts survive ingestion or that missing weeks represent inactivity.
 
 These values are observations, not regression-test expectations. A DVC run was
 active during the review, so they do not certify a single synchronized snapshot

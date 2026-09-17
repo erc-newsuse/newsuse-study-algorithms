@@ -23,8 +23,12 @@ needed; avoid duplicating architecture descriptions across skills.
 Distinguish verified code behavior, observed artifact snapshots, scientific
 assumptions, and unresolved discrepancies. Do not promote a comment's rationale
 to a verified result. Maintain source links and navigation; remove unsupported
-claims rather than filling gaps with guesses. Keep task progress and bug
-backlogs out of the wiki.
+claims rather than filling gaps with guesses. Keep verified explanations in
+reference pages and detailed unresolved questions in the
+[concerns register](../../../wiki/concerns/README.md), following its evidence and
+resolution conventions. Preserve short caveats and cross-links in reference
+pages. Updating prose alone does not resolve an underlying computational issue.
+Keep session logs, assignments, and task progress out of both layers.
 
 Limit edits to agent guidance and documentation. Preserve unrelated work;
 do not install dependencies, run `make init`, reproduce stages, render notebooks,

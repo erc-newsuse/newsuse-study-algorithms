@@ -6,7 +6,8 @@ working conventions, and validation expectations.
 
 Use the [README](../README.md) for orientation and the
 [wiki index](../wiki/README.md) for architecture, data contracts, the DVC pipeline,
-statistical methods, and notebook dependencies. Verify behavior against current
+statistical methods, and notebook dependencies. Unresolved questions live in the
+[concerns register](../wiki/concerns/README.md). Verify behavior against current
 source before relying on documentation.
 
 Reusable project workflows:

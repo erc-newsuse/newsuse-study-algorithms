@@ -14,6 +14,8 @@ bridge, actual stage code, DVC declarations, and downstream notebook consumers.
 Use the [wiki](../../../wiki/README.md) to navigate; verify its claims against
 source. Distinguish active stages from historical lock entries and incidental
 local files from reproducible inputs.
+Consult the [concerns register](../../../wiki/concerns/README.md) for prior evidence
+and verification limits; an existing entry is not proof that it still applies.
 
 Prefer static inspection and small, isolated in-memory reproductions. When
 data is available, inspect Parquet metadata or only necessary columns before
@@ -33,7 +35,10 @@ Report observed behavior, supporting paths and checks, confirmed findings,
 remaining hypotheses, and the smallest plausible fix with a validation plan.
 If read-only evidence cannot establish numerical impact, say so. Recommend a
 separate authorized reproduction or implementation task rather than treating
-investigation as permission to change the analysis. Return findings to the user;
-do not create wiki pages or a bug tracker during this workflow.
+investigation as permission to change the analysis. Return findings to the user,
+including the relevant concern anchor or suggested documentation destination.
+Do not create or edit concern records, other wiki pages, or a bug tracker during
+this workflow. Register maintenance belongs to a separately requested
+documentation task.
 
 Adapted from the [confidantic reference skill](https://github.com/sztal/confidantic/blob/master/.github/skills/investigate/SKILL.md).

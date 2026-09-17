@@ -143,6 +143,37 @@ structured-file checks plus Ruff with `--fix` and formatting. These hooks can
 rewrite files. Use checks appropriate to the task and review any resulting
 edits rather than running broad mutation commands for documentation validation.
 
+## Bounded checks before recomputation
+
+Read scripts as text; importing their top-level code can execute the pipeline.
+Use small in-memory inputs or selected Parquet columns in the configured
+environment. These checks do not establish full scientific validity:
+
+| Question | Check without fitting or rendering | Evidence requiring later, separately scoped work |
+|---|---|---|
+| Are weights and denominators intended? | Hand-calculate examples with unequal posts/day, outlets, and years; compare each aggregation level with the relevant expression. For outlet totals 100 and 300, the current descriptive reaction formula yields 100, versus mean 200. | Measure impact on exported results after the intended estimand is confirmed. |
+| Which posts are eligible? | Inspect selected metadata nulls and small join fixtures, key uniqueness, default join types, grouping null rules, and the strict epoch threshold. Count weekly contributors using narrow columns. | A complete key-level attrition account across compatible raw and processed snapshots; collection records to explain missing weeks. |
+| Are factors and contrasts aligned? | Enumerate declared levels and positional weights, translate R positions to epoch labels/dates, check signs and zero sums where appropriate. Trace covariance and estimates to the same contrast object. | Evaluate corrected contrasts from a compatible model and verify their downstream tables. |
+| Which optimizer runs? | Inspect the stage call and `formals(glmmTMB::glmmTMBControl)$optimizer`; constructing the control object does not fit a model. Check `packageVersion("glmmTMB")` and distinguish `optArgs` from `optimizer`. | Inspect stored model calls, `fit$convergence`, optimizer messages, and `sdr$pdHess`; compare estimates/convergence if controls are changed. Loading large RDS files still has resource costs. |
+| Can a notebook consume its inputs? | Match every read with an actual producer/schema; check epoch metadata, workbook fields, spreadsheet names, and sample-dependent columns. Inspect [seed scope](statistical-methods.md#optimizers-and-random-seeds) and [figure coordinates](analyses-and-outputs.md#figure-coordinates). | Render the named notebook in an isolated, compatible workflow and inspect its tables/figures when execution is part of the task. |
+
+For example, an isolated pandas reproduction of the documented denominator is:
+
+```python
+import pandas as pd
+
+totals = pd.Series([100.0, 300.0])
+assert totals.div(len(totals)).mean() == 100.0  # current expression
+assert totals.mean() == 200.0                  # mean of outlet totals
+```
+
+This checks arithmetic, not the intended scientific estimand. Similarly, a
+two-post fixture with one missing quality label demonstrates exclusion from
+`groupby(["country", "quality", "name"])` followed by an inner merge; it does
+not establish current real-data losses. Record verified limitations in the
+[concerns register](concerns/README.md) when documentation work is requested.
+An [investigation](../.github/skills/investigate/SKILL.md) itself remains read-only.
+
 ## Review snapshot and freshness
 
 During the initial documentation review on **2026-09-17**, read-only
@@ -163,3 +194,6 @@ The [data snapshot](data-contracts.md#observed-local-snapshot) describes files
 seen during this review. It does not establish that stored models, current
 tables, event annotations, and notebook exports all belong to one completed
 pipeline run. Before using publication results, verify that relationship.
+The [artifact synchronization concern](concerns/reproducibility.md#artifact-synchronization)
+defines the evidence needed; [environment and optional-input gaps](concerns/reproducibility.md#optional-artifacts-and-environment)
+remain distinct from whether a particular pipeline run completed.

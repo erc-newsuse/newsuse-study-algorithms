@@ -13,13 +13,17 @@ the [repository README](../README.md) provides the overview and quick start.
 | [Data contracts](data-contracts.md) | Inputs, provenance, keys, schemas, transformations, and local data snapshots. |
 | [DVC pipeline](dvc-pipeline.md) | The 12 active stages, declared DAG, runtime dependencies, and tracking gaps. |
 | [Statistical methods](statistical-methods.md) | Model formulas, derived signals, changepoints, epochs, and inferential contrasts. |
+| [Supporting analyses](supporting-analyses.md) | Descriptive denominators, Gaussian/AR(1) models, normalized audience comparisons, and their plotting conventions. |
 | [Analyses and outputs](analyses-and-outputs.md) | Every Quarto notebook, its prerequisites, and publication artifacts. |
 | [Development and reproducibility](development-and-reproducibility.md) | Environment setup, inspection, execution, validation limits, and artifact freshness. |
+| [Concerns register](concerns/README.md) | Unresolved discrepancies, assumptions, fragile interfaces, and missing evidence, with next checks and resolution criteria. |
 
 For a first visit, read study design and architecture, then follow the pipeline.
 For a data change, start with data contracts and check downstream notebooks.
 For a statistical question, read methods together with the notebook computing
 the estimate. For a failed command, start with the development guide.
+For a questionable result, follow the reference page's concern link and verify
+the evidence against source before proposing a computational change.
 
 ## Terms used here
 
@@ -53,5 +57,10 @@ Use [create-wiki](../.github/skills/create-wiki/SKILL.md) and
 [update-wiki](../.github/skills/update-wiki/SKILL.md) to maintain these pages;
 [agent-context-update](../.github/skills/agent-context-update/SKILL.md) keeps the
 broader guidance consistent. Use [investigate](../.github/skills/investigate/SKILL.md)
-for read-only diagnosis. Keep limitations beside the relevant explanation
-rather than creating a running task backlog.
+for read-only diagnosis. Reference pages explain verified behavior, retaining
+short caveats that link to detailed entries in `concerns/`. The register
+separates confirmed discrepancies, methodological assumptions, potential
+fragility, and missing evidence. It is maintained technical documentation, not
+a task backlog or session log. See its [entry conventions](concerns/README.md#how-to-read-and-maintain-entries).
+Updating a concern record does not authorize a computational fix, and fixing
+its description does not establish that the underlying issue is resolved.

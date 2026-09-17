@@ -104,6 +104,11 @@ not changes made by this documentation work:
   outputs are outside the DVC DAG. A stage-only reproduction is not a complete
   reproduction of every publication artifact.
 
+The inventory above remains the operational contract reference. The
+[DVC concern](concerns/reproducibility.md#dvc-declaration-coverage) records what
+verification would resolve these omissions; notebook interfaces and artifact
+synchronization have separate entries in the same register.
+
 ## Active versus historical state
 
 The reviewed [dvc.lock](../dvc.lock) retains entries such as `posts`,

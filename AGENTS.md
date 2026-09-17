@@ -109,6 +109,9 @@ dates as snapshots; distinguish them from stable contracts. Do not invent paper
 results, metadata provenance, or justifications absent from the repository.
 Record suspected inconsistencies with evidence and verification limits,
 without silently changing calculations to fit an interpretation.
+Use [supporting analyses](wiki/supporting-analyses.md) for notebook-specific
+weights and formulas, and the [concerns register](wiki/concerns/README.md) for
+unresolved calculation, provenance, interpretation, and reproducibility questions.
 
 - [agent-context-update](.github/skills/agent-context-update/SKILL.md): refresh
   guidance and documentation after repository changes.
@@ -117,6 +120,10 @@ without silently changing calculations to fit an interpretation.
 - [investigate](.github/skills/investigate/SKILL.md): investigate behavior without
   modifying project files or artifacts.
 
-The wiki is a knowledge base, not a session log or task backlog. Keep unresolved
-questions beside the relevant technical explanation; report investigation
-findings to the user unless documentation updates are part of the requested task.
+The wiki has two layers: reference pages explain verified behavior; `wiki/concerns/`
+holds detailed unresolved questions, classified evidence, verification limits,
+and resolution criteria. Keep short caveats and links in the affected reference
+pages. Documentation maintenance may update the register; an investigation only
+reports findings and does not edit it. A prose correction does not resolve an
+underlying computational concern. Neither layer is a session log, assignment
+list, or authorization to change the analysis.

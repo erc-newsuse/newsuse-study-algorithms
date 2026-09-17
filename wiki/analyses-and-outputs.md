@@ -23,10 +23,10 @@ not saved as separate tracked `.tex` files.
 
 | Notebook | Inputs / prerequisites | Computation and outputs |
 |---|---|---|
-| [descriptives.qmd](../analyses/descriptives.qmd) | Raw metadata, `dataset.parquet`, `non-news.parquet`. Python only. | Post/reaction summaries, outlet distributions, engagement correlations; LaTeX tables and `descriptives/descriptives-basic.pdf`. |
-| [timeseries.qmd](../analyses/timeseries.qmd) | `weekly.parquet`, `weekly-non-news.parquet`, events, election settings. R + Python. | Fits Gaussian log-reactions models with and without AR(1); posting associations, model comparison, residual ACF, model table; `glmm/timeseries/timeseries.pdf`, `acf.pdf`. |
+| [descriptives.qmd](../analyses/descriptives.qmd) | Raw metadata, `dataset.parquet`, `non-news.parquet`. Python only. | [Descriptive calculations](supporting-analyses.md#descriptive-summaries), outlet distributions, engagement correlations; LaTeX tables and `descriptives/descriptives-basic.pdf`. |
+| [timeseries.qmd](../analyses/timeseries.qmd) | `weekly.parquet`, `weekly-non-news.parquet`, events, election settings. R + Python. | [Gaussian and AR(1) models](supporting-analyses.md#posting-and-engagement-time-series), posting associations, model comparison, residual ACF, model table; `glmm/timeseries/timeseries.pdf`, `acf.pdf`. |
 | [changepoints.qmd](../analyses/changepoints.qmd) | `dataset.parquet`, `epochs.parquet`, `changepoints.parquet`, `epoch-meta.parquet`, `signal.parquet`, events. Python only. | Relative mean/CV signal and peak-bound plots with annotations; event table; `changepoints/changepoints.pdf`, `changepoints-mean.pdf`. |
-| [alternatives.qmd](../analyses/alternatives.qmd) | `comscore.parquet`, `timeseries.parquet`, raw Statista workbook, events. Python only. | Relative audience/engagement trends and platform user counts; `alternatives/comscore.pdf`, `statista.pdf`. |
+| [alternatives.qmd](../analyses/alternatives.qmd) | `comscore.parquet`, `timeseries.parquet`, raw Statista workbook, events. Python only. | [Normalized audience/engagement trends](supporting-analyses.md#audience-and-alternative-explanations) and platform user counts; `alternatives/comscore.pdf`, `statista.pdf`. |
 | [glmm-news.qmd](../analyses/glmm-news.qmd) | `models/glmm/news/main.rds`, epochs/epoch metadata/peaks, dataset post types. R + Python. | Corrected EMMs, quality/epoch and sequential contrasts, joint tests, supplementary contrasts; LaTeX tables, four PDFs under `glmm/news/`, `outlets-emm-news.xlsx`. |
 | [glmm-both.qmd](../analyses/glmm-both.qmd) | `models/glmm/both/quality.rds`, epochs/epoch metadata/peaks, non-news post types. R + Python. | Corrected sector/quality EMMs, baseline/sequential DiD, parallel-trends calculation, supplements; LaTeX tables, `glmm/both/both-emmeans.pdf`, `both-contrasts.pdf`, `outlets-emm-non-news.xlsx`. |
 | [glmm-total.qmd](../analyses/glmm-total.qmd) | Joint `quality.rds`, epoch metadata, peaks. R + Python. | Focal epoch contrasts 4→8, 8→11, 4→11 and their news/non-news ratios; LaTeX tables, `glmm/total/emmeans.pdf`, `effects.pdf`. |
@@ -53,14 +53,15 @@ The notable file-level dependency is the outlet workflow: `glmm-news.qmd` writes
 These contain observed outlet/epoch summaries, random-effect information, and
 link-post proportions, despite the `emm` name. `glmm-outlets.qmd` instead reads
 `outlets-emm.xlsx`. No tracked producer of that exact filename was found.
-Running the two producer notebooks is therefore not sufficient to satisfy the
-consumer without a separately resolved data contract. Do not silently rename
-or combine the outputs as if that transformation were defined.
+The [spreadsheet concern](concerns/reproducibility.md#notebook-execution-and-outlet-spreadsheet)
+records the unresolved producer-consumer contract and the checks needed to
+resolve it. Do not silently rename or combine the outputs.
 
 `epoch-meta.parquet`, required by several notebooks, is written by changepoint
 postprocessing but omitted from its DVC outputs. A clean checkout with pulled
 tracked artifacts can therefore lack it. Inspect this explicitly before
 rendering; `dvc status` alone cannot certify all notebook prerequisites.
+See [DVC coverage](concerns/reproducibility.md#dvc-declaration-coverage).
 
 ## Epoch and artifact assumptions
 
@@ -81,12 +82,32 @@ rendering; `dvc status` alone cannot certify all notebook prerequisites.
   no tracked render order resolving the outlet spreadsheet mismatch. Prefer a
   named notebook after checking its actual inputs.
 
+See [fixed epoch positions](concerns/epochs-and-annotations.md#fixed-epoch-positions)
+for compatibility checks after segmentation changes.
+
+## Figure coordinates
+
+The filenames below use the destinations in the notebook inventory. A figure's
+annotation coordinate is distinct from the scientific observation or fitted mean.
+
+| Source / figures | Time or annotation coordinate |
+|---|---|
+| [changepoints.qmd](../analyses/changepoints.qmd): `changepoints.pdf`, `changepoints-mean.pdf` | Signals use weekly timestamps; peaks/bounds are detected coordinates; event markers use workbook `Date`. Outer epoch start/end and midpoints are extended for display. The printed event table separately exposes detected timestamps and annotation dates. |
+| [timeseries.qmd](../analyses/timeseries.qmd): `timeseries.pdf` | Smoothed weekly data; event markers use workbook `Date`, with configured elections and a fixed COVID date. `acf.pdf` uses residual-vector lag, not event dates. |
+| [alternatives.qmd](../analyses/alternatives.qmd): `comscore.pdf` | Monthly plotted series; selected labels use workbook `Timestamp` (from `timestamp`), with month lookup for height and subsequent text adjustment. `statista.pdf` uses January 1 for each input year and has no policy-date overlay. |
+| [glmm-news.qmd](../analyses/glmm-news.qmd), [glmm-both.qmd](../analyses/glmm-both.qmd): EMM, contrast, and epoch timeline figures | Saved epoch start/mid/end coordinates; some plotting data extend first/last intervals and shift labels for spacing. These display changes do not rewrite saved epoch metadata. |
+| [glmm-total.qmd](../analyses/glmm-total.qmd): `emmeans.pdf`, `effects.pdf` | Categorical focal epoch/transition positions rather than an announcement-date time axis. |
+| Descriptive, validation, and outlet plots; printed model tables | Distribution, group, or association coordinates; not policy-date annotations. See their source notebooks in the inventory. |
+
+Alignment questions and resolution criteria belong in
+[annotation coordinates](concerns/epochs-and-annotations.md#annotation-coordinates).
+
 ## Inference and interpretation
 
-The EMM correction, model families, contrast scales, and statistical review
-points are described in [methods](statistical-methods.md). In particular, the
-parallel-trends covariance selection and validation variance formula require
-review before treating those computations as validated evidence. Comments
-about low correlations, model fit, or causal effects are not recorded numeric
-results by themselves. The wiki maps the computation; it does not certify
+The EMM correction, model families, and contrast scales are described in
+[methods](statistical-methods.md); other calculations are in
+[supporting analyses](supporting-analyses.md). Consult
+[calculation concerns](concerns/statistical-calculations.md) and
+[interpretation concerns](concerns/inference-and-interpretation.md) before relying
+on unresolved summaries. The wiki maps the computation; it does not certify
 publication findings without a compatible, synchronized reproduction.

@@ -7,6 +7,9 @@ December 2025, including the period before, during, and after the "War on News".
 Contributor guidance: [AGENTS.md](AGENTS.md). Detailed project reference:
 [wiki](wiki/README.md), including [data contracts](wiki/data-contracts.md), the
 [DVC pipeline](wiki/dvc-pipeline.md), and [statistical methods](wiki/statistical-methods.md).
+Notebook calculations are explained in [supporting analyses](wiki/supporting-analyses.md).
+Unresolved discrepancies and verification limits have a separate
+[concerns register](wiki/concerns/README.md).
 
 Companion repository for the paper:
 
