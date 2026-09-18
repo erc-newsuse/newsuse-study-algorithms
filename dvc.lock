@@ -74,8 +74,8 @@ stages:
       size: 242527235
     - path: stages/glmm_reactions.R
       hash: md5
-      md5: 45a5d9d6e38f2a0d4f857326e17e1d93
-      size: 2543
+      md5: d4fa5b77d0924c84e676f05eec3f90eb
+      size: 3464
     outs:
     - path: models/glmm/reactions
       hash: md5
@@ -96,13 +96,13 @@ stages:
       nfiles: 1
     - path: stages/make_dataset.R
       hash: md5
-      md5: b42763d40fb9d7e52ad26887f456b762
-      size: 2657
+      md5: b580a92190d474cb630d05b6732f5669
+      size: 3386
     outs:
     - path: data/proc/dataset.parquet
       hash: md5
-      md5: 3180fc8f4a5302179544be8c4618f60b
-      size: 249356972
+      md5: f7c2e70a5dc4cfe270496adecbb204d7
+      size: 267942845
   timeseries:
     cmd: python stages/make_timeseries.py
     deps:
@@ -112,12 +112,12 @@ stages:
       size: 92418
     - path: data/proc/weekly.parquet
       hash: md5
-      md5: f742aaec2a32ef73b06e8494596c26e6
-      size: 994193
+      md5: cb462a5bc3fcc7ee380d08c4a9f55778
+      size: 994242
     - path: stages/make_timeseries.py
       hash: md5
-      md5: bdeb15b74335d45e10e7320150fe15ac
-      size: 2373
+      md5: 93b1174fc73cd3b8ea8d6979592ed5ef
+      size: 2965
     outs:
     - path: data/proc/timeseries.parquet
       hash: md5
@@ -185,12 +185,12 @@ stages:
     deps:
     - path: data/proc/signal.parquet
       hash: md5
-      md5: 1e8b52a059dbd956678d82e49aeabfe4
-      size: 30795
+      md5: c0dbccef6923af7fee3655f19ef89408
+      size: 30798
     - path: stages/changepoints_detect.R
       hash: md5
-      md5: ebcea5f2acc2bfb154d60cd901dcfd53
-      size: 2399
+      md5: 8a2bc918aaee9031c9e3264621088098
+      size: 3056
     params:
       params.yaml:
         changepoints.beast:
@@ -228,17 +228,17 @@ stages:
     deps:
     - path: data/proc/weekly.parquet
       hash: md5
-      md5: f742aaec2a32ef73b06e8494596c26e6
-      size: 994193
+      md5: cb462a5bc3fcc7ee380d08c4a9f55778
+      size: 994242
     - path: stages/make_signal.py
       hash: md5
-      md5: c896643e15931f45fbc81ffce5b962a1
-      size: 1394
+      md5: 0c3f9f3ca7e97a63da5a838d2b40eb7c
+      size: 1830
     outs:
     - path: data/proc/signal.parquet
       hash: md5
-      md5: 1e8b52a059dbd956678d82e49aeabfe4
-      size: 30795
+      md5: c0dbccef6923af7fee3655f19ef89408
+      size: 30798
   changepoints-postprocess:
     cmd: python stages/changepoints_postprocess.py
     deps:
@@ -248,8 +248,8 @@ stages:
       size: 193896
     - path: stages/changepoints_postprocess.py
       hash: md5
-      md5: 55a298cf5be79feae5223c2902c89f35
-      size: 7640
+      md5: 1ca435a5de05c55b4a68cba8e05301de
+      size: 8936
     params:
       params.yaml:
         changepoints.peaks:
@@ -281,16 +281,16 @@ stages:
     deps:
     - path: data/proc/dataset.parquet
       hash: md5
-      md5: 3180fc8f4a5302179544be8c4618f60b
-      size: 249356972
+      md5: f7c2e70a5dc4cfe270496adecbb204d7
+      size: 267942845
     - path: data/proc/non-news.parquet
       hash: md5
       md5: 9ad1eaa94d21cc6cd931061427a524c8
       size: 17985166
     - path: stages/make_weekly.py
       hash: md5
-      md5: 4a8f666cf1c5664c10b19e957c4fe835
-      size: 2936
+      md5: 90e7b3d05bde034dcb4538b3598f16d3
+      size: 3542
     outs:
     - path: data/proc/weekly-non-news.parquet
       hash: md5
@@ -298,8 +298,8 @@ stages:
       size: 92418
     - path: data/proc/weekly.parquet
       hash: md5
-      md5: f742aaec2a32ef73b06e8494596c26e6
-      size: 994193
+      md5: cb462a5bc3fcc7ee380d08c4a9f55778
+      size: 994242
   glmm-changepoints-basic:
     cmd: Rscript scripts/glmm_changepoints_basic.R
     deps:
@@ -420,8 +420,8 @@ stages:
       size: 9893907
     - path: stages/make_nonnews.py
       hash: md5
-      md5: 6a01e0a71705c4fd821ede719becfda5
-      size: 2017
+      md5: 0ca4a390e48620441ac201c8542eeef5
+      size: 2439
     params:
       params.yaml:
         data.author:
@@ -519,29 +519,29 @@ stages:
     deps:
     - path: data/proc/dataset.parquet
       hash: md5
-      md5: 3180fc8f4a5302179544be8c4618f60b
-      size: 249356972
+      md5: f7c2e70a5dc4cfe270496adecbb204d7
+      size: 267942845
     - path: data/proc/epochs.parquet
       hash: md5
       md5: c4c7c2970c6a758985c066ad9062104d
       size: 143012383
     - path: stages/glmm_news.R
       hash: md5
-      md5: 180f6d2a8d75a504a9a0b7d4286701dc
-      size: 2794
+      md5: 40ace3abd96f5a122576f18fa672c721
+      size: 3590
     outs:
     - path: models/glmm/news
       hash: md5
-      md5: 1227dd3ee096e62b269af0287154d96c.dir
-      size: 184509027
+      md5: e21cb4c0a24678ed0eaec9a58f0437c5.dir
+      size: 184511612
       nfiles: 1
   glmm-both:
     cmd: Rscript stages/glmm_both.R
     deps:
     - path: data/proc/dataset.parquet
       hash: md5
-      md5: 3180fc8f4a5302179544be8c4618f60b
-      size: 249356972
+      md5: f7c2e70a5dc4cfe270496adecbb204d7
+      size: 267942845
     - path: data/proc/epochs.parquet
       hash: md5
       md5: c4c7c2970c6a758985c066ad9062104d
@@ -552,8 +552,8 @@ stages:
       size: 17985166
     - path: stages/glmm_both.R
       hash: md5
-      md5: 23d9ba4eaab58656c1db27e0c3acdb10
-      size: 3644
+      md5: b650311b4175f01fc3afc7c31b391dc9
+      size: 4398
     outs:
     - path: models/glmm/both
       hash: md5
@@ -581,8 +581,8 @@ stages:
       size: 563357107
     - path: stages/make_news.py
       hash: md5
-      md5: 4489fd012abca709c5a3e12f27f4c5b0
-      size: 5278
+      md5: 7e35ea8a05b9a24ce73602551a504f74
+      size: 6398
     params:
       params.yaml:
         data:
@@ -630,8 +630,8 @@ stages:
       size: 15699
     - path: stages/make_comscore.py
       hash: md5
-      md5: 9bf8b4ce578e7d8e943a2f889862590d
-      size: 2166
+      md5: 422e1a055c8ee62c745953d9db9f9764
+      size: 2687
     params:
       params.yaml:
         comscore:
