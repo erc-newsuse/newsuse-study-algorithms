@@ -4,7 +4,8 @@
 
 ## Calendar conversion and weekly alignment
 
-**Classification: potential fragility.**
+**Classification: confirmed calendar defect on bounded inputs; downstream
+impact unquantified.**
 [changepoints_postprocess.py](../../stages/changepoints_postprocess.py) constructs
 month from fractional year × 12 and day independently from a day offset, then
 joins on calendar year plus ISO week. Those two calendar systems differ near
@@ -14,9 +15,16 @@ retain time of day. [Signal construction](../../stages/make_signal.py) and the
 regular time coordinates; current US-only data does not establish multi-country
 correctness. See [methods](../statistical-methods.md#beast-detection-and-peak-selection).
 
-**Limits:** no quantified date shift or downstream effect is asserted.
-**Next check and resolution:** use synthetic leap-day, month-end, December/January,
-and non-midnight values to trace conversion, week joins, and boundary assignment.
+The September 18 [calendar check](mismatches/signals-and-changepoints.md#calendar-coordinate-defect)
+shows that the signal's calendar-year/ISO-week formula maps consecutive dates
+2019-12-23 and 2019-12-30 to decreasing coordinates; the postprocessing conversion
+then maps the latter to 2019-01-11. This is separate from the manuscript–code
+differences in [probability processing and peak selection](mismatches/signals-and-changepoints.md#probability-processing-and-peak-selection).
+
+**Limits:** these are synthetic calendar inputs, not reconstructed study
+changepoints; no effect on fitted epochs or estimates has been quantified.
+**Next check and resolution:** extend the bounded examples to leap days, month
+ends and non-midnight values, tracing week joins and boundary assignment.
 Check that detector spacing matches the signal grid. Resolve by specifying and
 verifying a consistent calendar mapping, including its supported country/time
 range, before generalizing or changing the conversion.
@@ -68,6 +76,9 @@ see the [figure coordinate map](../analyses-and-outputs.md#figure-coordinates).
 
 **Limits:** this may be deliberate; it is not evidence that all labels are
 misplaced or that workbook dates establish a policy's causal effect.
+The separate [manuscript comparison](mismatches/policy-and-publication-provenance.md#event-labels-dates-and-identities)
+does establish differences in event identities and dates between the workbook
+and Table F.7; a plotting-coordinate decision cannot resolve those differences.
 **Next check and resolution:** compare selected workbook rows, saved boundaries,
 plot coordinates, and intended captions; verify date support and fallbacks.
 Resolve by documenting intentional coordinates or separately changing labels

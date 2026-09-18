@@ -44,21 +44,29 @@ otherwise retain the limitation and assess sensitivity in separate work.
 
 ## Upstream and manuscript evidence
 
-**Classification: missing evidence.** The [README](../../README.md) still has
-a TBA paper citation. The [raw input inventory](../data-contracts.md#inputs-and-tracking)
-and ingestion source do not establish the complete sampling frame, quality-rating
-procedure, upstream reaction-imputation methodology, all access/licensing terms,
-policy source citations, or which exported artifacts support each manuscript
-claim. A workbook annotation is evidence of a stored date, not independent
-verification of the underlying policy history.
+**Classification: missing implementation and input provenance, with specific
+manuscript–code discrepancies.** The September 17
+[manuscript](../manuscript/README.md) now supplies sampling, rating, imputation,
+collection/access and policy-source descriptions. These descriptions do not
+establish how the repository's imported inputs were produced. The September 18
+[data comparison](mismatches/data-and-provenance.md) distinguishes missing
+collection/cleaning lineage, absent reactions–views validation and continuous
+quality-score inputs, and the preliminary-model imputation path made unreachable
+by an earlier missing-reaction exclusion. External imputation remains active.
+See also the [full component coverage map](mismatches/coverage-map.md) and
+[policy/publication provenance](mismatches/policy-and-publication-provenance.md).
 
-**Limits:** filenames, category labels, and local data access cannot supply these
-facts. The computation can be understood without fully reconstructing the study's
-provenance; scientific interpretation requires more evidence.
-**Next check and resolution:** obtain methodological records, data dictionaries,
-authoritative policy references, access terms, and a manuscript-to-output map.
-Resolve each gap individually by linking those records and documenting their
-relation to the actual inputs and analyses. Do not infer missing methodology.
+**Limits:** manuscript descriptions are substantive evidence, but not executable
+provenance. Matching processed row counts cannot reconcile every upstream
+exclusion, prove access rights, or identify the outputs used in the PDF.
+Internal manuscript ambiguities remain in its separate
+[reading notes](../manuscript/reference/reading-notes.md).
+**Next check and resolution:** link input dictionaries, upstream scripts and
+collection records to the described procedures and reconcile the imported-data
+boundary with the manuscript's raw-data boundary. Identify continuous ratings,
+proxy-validation inputs, and a manuscript-to-output manifest. Resolve gaps
+individually; do not reconstruct missing methodology from filenames or silently
+choose between the manuscript's different imputation accounts.
 
 ## ComScore selection
 
@@ -68,6 +76,9 @@ but the implementation does not read or join news data. It filters on start-date
 coverage and performs bounded forward/backward filling, not linear
 interpolation. These data feed [alternatives.qmd](../../analyses/alternatives.qmd);
 see the [implemented preprocessing](../data-contracts.md#non-news-and-audience-processing).
+The [manuscript comparison](mismatches/supporting-analyses.md#audience-comparison-transformations)
+also finds different reaction-series smoothing from Figure J.10b's caption;
+that transformation issue is distinct from outlet selection.
 
 **Limits:** whether the supplied ComScore file already has the intended outlet
 set is unknown; the source discrepancy alone does not establish an actual

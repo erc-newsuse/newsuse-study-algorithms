@@ -12,8 +12,10 @@ returns 100 instead of the arithmetic mean 200. The separate overall reaction
 average weights annual means equally, as described in
 [descriptive summaries](../supporting-analyses.md#descriptive-summaries).
 
-**Limits:** the arithmetic discrepancy is established; whether exported paper
-tables use this block, and the impact on them, have not been established.
+The September 18 comparison identifies Figure C.5c as the corresponding
+manuscript display; see the [source comparison](mismatches/supporting-analyses.md#average-outlet-reaction-totals).
+**Limits:** the arithmetic discrepancy is established, but an exact export-to-PDF
+provenance link and the numerical impact on the printed table remain unverified.
 **Next check and resolution:** confirm the intended estimand and manuscript
 consumer. If the intended statistic is the mean outlet total, remove one
 division in a separate computational change and verify unequal outlet totals,
@@ -22,20 +24,27 @@ formula/label agree and affected exports have been checked.
 
 ## Time-series correlation
 
-**Classification: methodological assumption.**
+**Classification: confirmed manuscript–code discrepancy, with an unresolved
+statistical estimand.**
 [timeseries.qmd](../../analyses/timeseries.qmd) labels
 `beta * sqrt(var(log(n_posts))) / sqrt(exp(dispersion EMM))` as correlation.
 The [reference](../supporting-analyses.md#posting-and-engagement-time-series)
 records its construction. A dispersion-component prediction is not automatically
 the total marginal response variance needed for an ordinary standardized slope.
-The table attaches `emtrends` p-values to this derived statistic.
+The table attaches `emtrends` p-values to this derived statistic. Equation (D.3)
+instead names the variance of log reactions in the denominator. A September 18
+inspection of installed glmmTMB 1.1.10 and emmeans 1.11.2.8 established that the
+Gaussian dispersion prediction used here exponentiates to residual standard
+deviation, not response variance. The source also omits the AR(1) contribution
+from this denominator. Full evidence and package-version limits are in the
+[manuscript comparison](mismatches/supporting-analyses.md#posting-reaction-correlation-denominator).
 
-**Limits:** no fit or numerical range check was performed; package-specific
-dispersion scale, AR(1) variance contribution, and the intended estimand need
-to be established. This is not a demonstrated numerical correction.
-**Next check and resolution:** derive the denominator from the installed
-glmmTMB/emmeans implementation, align quality ordering, and verify on a small
-model with known covariance. Resolve by deriving and validating the named
+**Limits:** no fit or numerical range check was performed; the environment of
+the published fit, the appropriate total variance and the intended estimand
+remain unverified. This does not supply corrected manuscript correlations.
+**Next check and resolution:** derive the intended model-based correlation,
+including the AR(1) contribution and any conditioning, align quality ordering,
+and verify on a small model with known covariance. Resolve by validating the named
 statistic or choosing an accurate label and separate interpretation for its
 trend tests; then inspect affected tables.
 
@@ -65,12 +74,15 @@ uses `vcov(con)` from an earlier contrast object. Its before-period slice uses
 `1:START_WAR`, while the baseline is described as epochs 0–4. These issues
 affect the notebook's parallel-trends tests, not the underlying fitted RDS.
 
-**Limits:** object provenance differs; compatible dimensions alone do not
-establish correct covariance alignment. The actual included transitions and
-numerical effect have not been validated.
-**Next check and resolution:** enumerate contrast labels and weights, match
-estimate/covariance row order, and identify the transition across onset. Verify
-the intended pre-period and compare statistics using the matching contrast
+The September 18 [manuscript comparison](mismatches/models-and-inference.md#parallel-trends-covariance-and-periods)
+enumerates the transitions and reproduces the mismatch with a synthetic
+`emmeans` grid: the before-period slice includes **4→5**, and the two covariance
+objects have different variances even when their dimensions agree.
+
+**Limits:** the source and synthetic example establish the defect, but no actual
+fit was loaded and no replacement trend-test statistic or p-value was computed.
+**Next check and resolution:** match estimate/covariance row order and explicitly
+define the pre-period. Compare statistics using the matching contrast
 covariance in a separate inference check. Resolve when object alignment and
 period definitions are demonstrated. See
 [causal interpretation](../study-design.md#comparisons-and-causal-interpretation).
@@ -85,8 +97,13 @@ NB2-style expression. The families and actual output roles are described in
 [final models](../statistical-methods.md#final-epoch-models) and the
 [notebook map](../analyses-and-outputs.md).
 
-**Limits:** this does not establish that the stored model fit is wrong or that
-the computed `sigma` reaches a publication result.
+The September 18 [consumer trace](mismatches/supporting-analyses.md#validation-variance-and-its-consumers)
+found no later use of `sigma` within either notebook. Their mean-fit panels use
+other quantities, including `abs(mean - mu) / mean`.
+
+**Limits:** this does not establish that the stored fit or the manuscript's
+Figures G.7/H.8 are wrong. The unused expression is a local calculation defect,
+not an established source of error in published intervals or main contrasts.
 **Next check and resolution:** inspect the saved family and predicted dispersion
 meaning, trace uses of `sigma`, and derive the family-consistent summary. Resolve
 after the intended summary is tested on known mean/dispersion inputs and its

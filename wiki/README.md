@@ -9,7 +9,7 @@ the [repository README](../README.md) provides the overview and quick start.
 | Page | Read it to understand |
 |---|---|
 | [Study design](study-design.md) | Research questions, comparison groups, policy context, and interpretation boundaries. |
-| [Manuscript reference guide](manuscripts/README.md) | Detailed account of the September 17, 2026 article: argument, data, methods, results, notation, and source-specific reading notes. |
+| [Manuscript reference guide](manuscript/README.md) | Detailed account of the September 17, 2026 article: argument, data, methods, results, notation, and source-specific reading notes. |
 | [Architecture](architecture.md) | Python/R responsibilities, configuration, reticulate, and the external `newsuse` library. |
 | [Data contracts](data-contracts.md) | Inputs, provenance, keys, schemas, transformations, and local data snapshots. |
 | [DVC pipeline](dvc-pipeline.md) | The 12 active stages, declared DAG, runtime dependencies, and tracking gaps. |

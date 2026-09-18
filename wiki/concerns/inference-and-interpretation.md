@@ -51,10 +51,17 @@ comparison group. See [study design](../study-design.md#comparisons-and-causal-i
 **Limits:** non-rejection of a pre-period test does not establish parallel trends;
 the implemented test also has a separate
 [calculation concern](statistical-calculations.md#parallel-trends-covariance-and-indexing).
+The [manuscript comparison](mismatches/models-and-inference.md#parallel-trends-covariance-and-periods)
+establishes both the wrong covariance source and inclusion of the onset
+transition in the notebook's before-period test, without supplying corrected
+test results.
 Low custom correlations in [timeseries.qmd](../../analyses/timeseries.qmd) do
 not establish independence or identify an algorithmic mechanism. Audience plots
 in [alternatives.qmd](../../analyses/alternatives.qmd) provide context rather
 than eliminate all alternative explanations.
+Appendix K also qualifies the quality-related recovery narrative through a
+format-adjusted analysis, but its complete computational producer is missing
+from the inspected source; see [recovery-analysis coverage](mismatches/post-format-and-recovery.md#missing-substantive-analyses).
 **Next check and resolution:** substantiate comparison-group exposure and
 collection stability, validate the pre-period calculation, and assess plausible
 alternative explanations and sensitivity. Resolve by matching the strength of

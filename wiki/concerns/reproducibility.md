@@ -35,8 +35,17 @@ for which no tracked producer was found. Data-dependent `link` columns and
 hardcoded outlet examples introduce further fragility when the sample changes.
 See [notebook contracts](../analyses-and-outputs.md#notebook-dependencies-beyond-dvc).
 
-**Limits:** a local spreadsheet could exist, but its provenance and compatibility
-would still need verification. Directory-wide rendering is not a verified build.
+The September 18 [Appendix K comparison](mismatches/post-format-and-recovery.md)
+also reproduces a `KeyError: 8` in the final grouped ratio calculation: integer
+indexing addresses columns although epochs are rows. No complete producer was
+found for K.13's OLS regression or K.12's correlation/bootstrap analysis. Current
+exports contain observed reaction means, so their EMM filenames alone do not
+establish compatibility with every manuscript predictor or outcome.
+
+**Limits:** the expected `outlets-emm.xlsx` was absent in the September 18
+snapshot; other untracked or historical work may exist elsewhere. Renaming a
+current export would not repair the indexing or supply the missing analyses.
+Directory-wide rendering is not a verified build.
 **Next check and resolution:** specify the intended producer, schema, sector
 coverage, and execution order. Resolve by verifying a producer-consumer contract
 and named-notebook prerequisites, including epoch metadata and sample-dependent
@@ -106,6 +115,10 @@ that the same process is still running.
 
 **Limits:** neither an existing artifact nor a later clean DVC status would
 alone establish agreement of all undeclared inputs and notebook outputs.
+The September 18 [manuscript comparison](mismatches/coverage-map.md#snapshot-and-reproduction-limits)
+checked current artifact metadata but did not load fitted models or establish
+an export-to-PDF manifest. It does not supersede the historical lock observation
+with a claim that current artifacts are synchronized.
 **Next check and resolution:** once existing work permits inspection, match source
 and parameter revisions, DVC identities, fitted-model inputs, epoch metadata,
 annotations, and export provenance. Resolve for a specified snapshot with that

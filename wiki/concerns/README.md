@@ -9,6 +9,7 @@ numerical harm or authorization to change a scientific calculation.
 
 | Topic | Questions and affected computations |
 |---|---|
+| [Manuscript–implementation mismatches](mismatches/README.md) | September 17 manuscript compared with source: signal construction, changepoints, models, inference, supporting analyses, missing producers, and publication provenance. Includes a component-by-component coverage map. |
 | [Statistical calculations](statistical-calculations.md) | Descriptive denominators, time-series summaries, parallel-trends covariance, validation variance, supplementary contrasts. |
 | [Epochs and annotations](epochs-and-annotations.md) | Calendar conversion, run normalization, fixed epoch positions, event and display coordinates. |
 | [Sampling and provenance](sampling-and-provenance.md) | Inclusion, coverage, missingness, upstream methods, audience selection. |
@@ -29,7 +30,10 @@ the evidence, and a next check with resolution criteria. Classifications mean:
 - **Missing evidence:** the available sources do not establish the needed fact.
 
 All entries are unresolved unless explicitly supported by resolution evidence.
-Source and bounded-check evidence was reviewed on **2026-09-17**. Local counts
+The original source review is dated **2026-09-17**. The
+[manuscript comparison](mismatches/README.md) and linked updates to existing
+entries are dated **2026-09-18**; they add source inspection and bounded synthetic
+checks, without refitting models or certifying published estimates. Local counts
 and installed-package behavior are dated observations, not permanent contracts;
 see [freshness limits](../development-and-reproducibility.md#review-snapshot-and-freshness).
 
@@ -44,4 +48,6 @@ assignment list, session log, or implementation commitment.
 Use the [wiki update skill](../../.github/skills/update-wiki/SKILL.md) when
 documentation maintenance is requested. The
 [investigate skill](../../.github/skills/investigate/SKILL.md) may read these
-entries but only reports findings; it does not edit the register.
+entries but, by default, only reports findings. Writing investigation reports
+into the register requires an explicit documentation request, as for the
+manuscript comparison above; it does not authorize computational changes.
